@@ -1,0 +1,13 @@
+# pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
+pretrained_model_name_or_path: 'xyn-ai/anything-v4.0'
+
+control_type: pose
+
+canny_controlnet: lllyasviel/control_v11p_sd15_canny
+pose_controlnet: lllyasviel/control_v11p_sd15_openpose
+
+
+json_file: 
+  - /mnt/petrelfs/majie/project/My-IP-Adapter/data/cctv/train_test.jsonl
+
+output_dir: output/reference_net/2023-12-04-17-27

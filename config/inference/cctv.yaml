@@ -1,0 +1,12 @@
+pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
+
+control_type: canny
+
+canny_controlnet: lllyasviel/control_v11p_sd15_canny
+pose_controlnet: lllyasviel/control_v11p_sd15_openpose
+
+
+json_file: 
+  - /mnt/petrelfs/majie/project/My-IP-Adapter/data/cctv/test.jsonl
+
+output_dir: output/cctv/2023-12-05-11-05

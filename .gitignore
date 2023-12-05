@@ -1,0 +1,7 @@
+output/*
+
+*.pyc
+
+data/*
+
+ui_output/*

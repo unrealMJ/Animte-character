@@ -1,0 +1,12 @@
+pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
+
+control_type: pose
+
+canny_controlnet: lllyasviel/control_v11p_sd15_canny
+pose_controlnet: lllyasviel/control_v11p_sd15_openpose
+
+
+json_file: 
+  - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/test.jsonl
+
+output_dir: output/motion_transfer/2023-12-01-20-21
