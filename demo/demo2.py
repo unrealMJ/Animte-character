@@ -1,21 +1,20 @@
 import os
 import shutil
+import jsonlines
 
 
-root = '/mnt/petrelfs/majie/datasets/TikTok/TikTok_dataset'
-for role in os.listdir(root):
-    pose_root = os.path.join(root, role, 'pose')
-    tmp = os.listdir(pose_root)[0]
-    tmp_root = os.path.join(pose_root, tmp)
+def generate_video_jsonl():
+    data = []
+    root = '/mnt/petrelfs/majie/project/diffusers/my_project/identity/TikTok/TikTok_dataset'
+    for role in os.listdir(root):
+        item = {}
+        item['role'] = role
+        item['role_root'] = os.path.join(root, role)
+        item['prompt'] = ''
 
-    if tmp.endswith('png'):
-        print(f'already done {pose_root}')
-        continue
+        data.append(item)
+    
+    with jsonlines.open('video.jsonl', 'w') as writer:
+        writer.write_all(data)
 
-
-    for each in os.listdir(tmp_root):
-        src_path = os.path.join(tmp_root, each)
-        dst_path = os.path.join(pose_root, each)
-        shutil.move(src_path, dst_path)
-    os.rmdir(tmp_root)
-    print(pose_root)
+generate_video_jsonl()

@@ -14,6 +14,7 @@ import json
 from torch.utils.data import IterableDataset, Dataset
 from tqdm import tqdm
 import jsonlines
+import copy
 
 
 class LaionHumanSD(Dataset):
@@ -34,12 +35,10 @@ class LaionHumanSD(Dataset):
         # TODO: support ARB bucket
         self.transform = transforms.Compose([
             transforms.Resize(self.size, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(self.size),
+            transforms.RandomCrop(self.size),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
         ])
-        
-        self.clip_image_processor = CLIPImageProcessor()
 
     def construct_data(self, data):
         keys = list(data.keys())
@@ -71,7 +70,7 @@ class LaionHumanSD(Dataset):
             raw_image = Image.open(image_file).convert("RGB")
             prompt = item["prompt"]
             image = self.transform(raw_image)
-            clip_image = self.clip_image_processor(images=raw_image, return_tensors="pt").pixel_values
+            reference = self.transform(raw_image)
         except Exception:
             return self.__getitem__((idx + 1) % len(self.data))
 
@@ -93,10 +92,11 @@ class LaionHumanSD(Dataset):
             return_tensors="pt"
         ).input_ids
         
+        # reference net 的 prompt可以是空文本？
         return {
             'image': image,
             'text_input_ids': text_input_ids,
-            'clip_image': clip_image,
+            'reference': reference,
             "drop_image_embed": drop_image_embed,
         }
 
@@ -239,6 +239,121 @@ class CCTVDataset(BaseDataset):
 class TikTokDataset(BaseDataset):
     pass
     
+
+class BaseVideoDataset(Dataset):
+    def __init__(self, json_file, tokenizer, control_type='canny', sample_size=512, sample_stride=4, sample_n_frames=24) -> None:
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.short_size = sample_size  # maybe not used
+        self.control_type = control_type
+        self.sample_stride = sample_stride
+        self.sample_n_frames = sample_n_frames
+
+        self.data = self.construct_data(json_file)
+
+    def construct_data(self, json_file_list):
+        if type(json_file_list) == str:
+            json_file_list = [json_file_list]
+
+        data = []
+        for json_file in json_file_list:
+            with jsonlines.open(json_file) as reader:
+                for each in reader:
+                    data.append(each)
+        return data
+    
+    def image_transform(self, image):
+        image = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(image)
+        image = transforms.CenterCrop(self.short_size)(image)
+
+        # i, j, h, w = transforms.RandomCrop.get_params(image, output_size=(512, 512))
+        # image = TF.crop(image, i, j, h, w)
+
+        image = transforms.ToTensor()(image)
+        image = transforms.Normalize([0.5], [0.5])(image)
+
+        return image
+    
+    def reference_transform(self, reference):
+        reference = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(reference)
+        reference = transforms.CenterCrop(self.short_size)(reference)
+
+        # i, j, h, w = transforms.RandomCrop.get_params(reference, output_size=(512, 512))
+        # reference = TF.crop(reference, i, j, h, w)
+        
+        reference = transforms.ToTensor()(reference)
+        reference = transforms.Normalize([0.5], [0.5])(reference)
+
+        return reference
+
+    def control_transform(self, control_image):
+        control_image = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(control_image)
+        control_image = transforms.CenterCrop(self.short_size)(control_image)
+        control_image = transforms.ToTensor()(control_image)
+        return control_image
+
+    def __getitem__(self, idx):
+        item = self.data[idx]
+
+        role_root = item['role_root']
+        all_images = os.listdir(f'{role_root}/images')
+        video_length = len(all_images)
+
+        clip_length = min(video_length, (self.sample_n_frames - 1) * self.sample_stride + 1)
+        start_idx = random.randint(0, video_length - clip_length)
+        batch_index = np.linspace(start_idx, start_idx + clip_length - 1, self.sample_n_frames, dtype=int)
+
+        image_list = []
+        control_list = []
+        for idx in batch_index:
+            idx = str(idx + 1).zfill(4)
+            image = Image.open(f'{role_root}/images/{idx}.png').convert("RGB")
+            image_list.append(image)
+            control_image = Image.open(f'{role_root}/{self.control_type}/{idx}.png').convert("RGB")
+            control_list.append(control_image)
+
+        reference = copy.deepcopy(image_list[0])
+        if 'prompt' not in item or item['prompt'] == '':
+            prompt = 'best quality,high quality'
+        else:
+            prompt = item['prompt']
+        
+        width, height = reference.size
+        width = (width // 8) * 8
+        height = (height // 8) * 8
+
+        reference = reference.resize((width, height))
+        image_list = [image.resize((width, height)) for image in image_list]
+        control_list = [control_image.resize((width, height)) for control_image in control_list]
+
+        # TODO: support random crop, keep consistency image and control
+        reference = self.reference_transform(reference)
+        image_list = [self.image_transform(image) for image in image_list]
+        control_list = [self.control_transform(control_image) for control_image in control_list]
+
+        text_input_ids = self.tokenizer(
+            prompt,
+            max_length=self.tokenizer.model_max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        ).input_ids
+        
+        video = torch.stack(image_list, dim=0)  # [n_frames, 3, h, w]
+        control_video = torch.stack(control_list, dim=0)
+
+        return {
+            'video': video,
+            'text_input_ids': text_input_ids,
+            'reference': reference,
+            'control_video': control_video,
+        }
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+
+
 
 
 if __name__ == '__main__':

@@ -33,14 +33,14 @@ class Inference:
         self.v_idx = 0
 
     def build_pipe(self, path):
-        # if self.cfg.control_type == 'canny':
-        #     controlnet = ControlNetModel.from_pretrained(self.cfg.canny_controlnet)
-        # elif self.cfg.control_type == 'pose':
-        #     controlnet = ControlNetModel.from_pretrained(self.cfg.pose_controlnet)
-        # else:
-        #     raise NotImplementedError
+        if self.cfg.control_type == 'canny':
+            controlnet = ControlNetModel.from_pretrained(self.cfg.canny_controlnet)
+        elif self.cfg.control_type == 'pose':
+            controlnet = ControlNetModel.from_pretrained(self.cfg.pose_controlnet)
+        else:
+            raise NotImplementedError
 
-        # controlnet = controlnet.to(dtype=torch.float16)
+        controlnet = controlnet.to(dtype=torch.float16)
 
         reference_net = UNet2DConditionModel.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="unet")
         state_dict = torch.load(path, map_location='cpu')
@@ -60,25 +60,15 @@ class Inference:
         # vae_model_path = "/mnt/petrelfs/majie/model_checkpoint/sd-vae-ft-mse"
         # infer_vae = AutoencoderKL.from_pretrained(vae_model_path).to(dtype=torch.float16)
 
-        pipe = StableDiffusionPipeline.from_pretrained(
+        pipe = StableDiffusionControlNetPipeline.from_pretrained(
             pretrained_model_name_or_path=self.cfg.pretrained_model_name_or_path,
+            # vae=infer_vae,
+            controlnet=controlnet,
             torch_dtype=torch.float16,
             scheduler=ddim_scheduler,
             feature_extractor=None,
             safety_checker=None
         )
-
-        # pipe = StableDiffusionPipeline.from_single_file('/mnt/petrelfs/majie/model_checkpoint/AbyssOrangeMix2_sfw.safetensors')
-
-        # pipe = StableDiffusionControlNetPipeline.from_pretrained(
-        #     pretrained_model_name_or_path=self.cfg.pretrained_model_name_or_path,
-        #     # vae=infer_vae,
-        #     controlnet=controlnet,
-        #     torch_dtype=torch.float16,
-        #     scheduler=ddim_scheduler,
-        #     feature_extractor=None,
-        #     safety_checker=None
-        # )
         pipe.enable_model_cpu_offload()
 
         self.pipe = pipe
@@ -121,12 +111,12 @@ class Inference:
         width = (width // 8) * 8
         height = (height // 8) * 8
         reference = reference.resize((width, height), Image.BILINEAR)
-        # control_image = control_image.resize((width, height), Image.BILINEAR)
+        control_image = control_image.resize((width, height), Image.BILINEAR)
 
         self.reference_forward(reference, prompt)
 
         reference_tmp = reference
-        # control_image_tmp = control_image
+        control_image_tmp = control_image
 
         # reference = transforms.ToTensor()(reference)
         # reference = transforms.Normalize([0.5], [0.5])(reference)
@@ -136,10 +126,10 @@ class Inference:
         # reference = reference.unsqueeze(0)
         # control_image = control_image.unsqueeze(0)
 
-        results = self.pipe(prompt=prompt, width=width, height=height, num_inference_steps=50, num_images_per_prompt=4).images
+        results = self.pipe(prompt=prompt, width=width, height=height, num_inference_steps=50, image=control_image, num_images_per_prompt=4).images
 
-        all_images = [reference_tmp] + results
-        grid = image_grid(all_images, 1, 5)
+        all_images = [reference_tmp] + [control_image_tmp] + results
+        grid = image_grid(all_images, 1, 6)
         return grid
     
     def reference_forward(self, reference_image, prompt):
@@ -257,26 +247,26 @@ if __name__ == '__main__':
 
     exp_dir = args.output_dir
 
-    # steps = list(range(0, 1000, 200))
-    # steps = [2000, 5000, 10000]
-    # for step in steps:
-    #     infer = Inference(args)
-    #     infer.build_pipe(os.path.join(exp_dir, f'checkpoint-{step}/pytorch_model.bin'))
-    #     infer.make_hook()
-    #     infer.validate(exp_dir, step)
+    steps = list(range(0, 1000, 200))
+    steps = [25000, 30000]
+    for step in steps:
+        infer = Inference(args)
+        infer.build_pipe(os.path.join(exp_dir, f'checkpoint-{step}/pytorch_model.bin'))
+        infer.make_hook()
+        infer.validate(exp_dir, step)
 
     # single image
-    step = 21000
-    infer = Inference(args)
-    infer.build_pipe(os.path.join(exp_dir, f'checkpoint-{step}/pytorch_model.bin'))
-    infer.make_hook()
-    prompt = '1girl,upper body,cry,sad'
+    # step = 21000
+    # infer = Inference(args)
+    # infer.build_pipe(os.path.join(exp_dir, f'checkpoint-{step}/pytorch_model.bin'))
+    # infer.make_hook()
+    # prompt = '1girl,upper body,cry,sad'
 
-    reference_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/0.png'
-    control_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/pose2.png'
+    # reference_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/0.png'
+    # control_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/pose2.png'
 
-    reference = Image.open(reference_path).convert("RGB")
-    control_image = Image.open(control_path).convert("RGB")
+    # reference = Image.open(reference_path).convert("RGB")
+    # control_image = Image.open(control_path).convert("RGB")
 
-    grid = infer.single_image_infer(reference, prompt, control_image)
-    infer.save(grid, prompt, exp_dir, step)
+    # grid = infer.single_image_infer(reference, prompt, control_image)
+    # infer.save(grid, prompt, exp_dir, step)

@@ -5,3 +5,5 @@ output/*
 data/*
 
 ui_output/*
+
+animate.egg-info/*

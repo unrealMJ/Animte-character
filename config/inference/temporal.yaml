@@ -1,0 +1,14 @@
+pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
+motion_path: guoyww/animatediff-motion-adapter-v1-5-2
+reference_path: /mnt/petrelfs/majie/project/My-IP-Adapter/output/reference_net/2023-12-04-17-27/checkpoint-30000/pytorch_model.bin
+json_file: 
+  - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/video/video.jsonl
+num_frames: 24
+
+control_type: pose
+
+pose_controlnet: lllyasviel/control_v11p_sd15_openpose
+canny_controlnet: lllyasviel/control_v11p_sd15_canny
+
+
+output_dir: output/temporal/2023-12-14-21-08
