@@ -1,10 +1,13 @@
-pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
+pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/sd-image-variations-diffusers
 image_encoder_path: /mnt/petrelfs/majie/project/IP-Adapter/IP-Adapter/models/image_encoder
 json_file: 
-  # - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/tiktok_all.jsonl
   - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/video/video.jsonl
-  # - /mnt/petrelfs/majie/project/My-IP-Adapter/data/mapping_file_training.json
 
+
+control_type: pose
+
+pose_controlnet: lllyasviel/control_v11p_sd15_openpose
+canny_controlnet: lllyasviel/control_v11p_sd15_canny
 
 mixed_precision: fp16
 train_batch_size: 8
@@ -19,6 +22,6 @@ num_train_steps: 50000
 
 save_steps: 500
 log_steps: 100
-output_dir: output/reference_wo_control
+output_dir: output/reference_clip
 
 resume: null

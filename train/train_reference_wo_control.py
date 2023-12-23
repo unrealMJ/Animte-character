@@ -211,9 +211,6 @@ def main():
         tracker_config.pop('json_file') # remove list type
         accelerator.init_trackers("controlnet", config=tracker_config)
 
-    # Load Metric
-    # metric = Metric(device=accelerator.device)
-
     # Load scheduler, tokenizer and models.
     noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
     tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer")
@@ -244,8 +241,8 @@ def main():
     optimizer = torch.optim.AdamW(params_to_opt, lr=args.learning_rate, weight_decay=args.weight_decay)
 
     # dataloader
-    # train_dataset = LaionHumanSD(json_file=args.json_file, tokenizer=tokenizer)
-    train_dataset = BaseDataset(json_file=args.json_file, tokenizer=tokenizer, control_type=args.control_type)
+    # train_dataset = BaseDataset(json_file=args.json_file, tokenizer=tokenizer)
+    train_dataset = TikTokDataset(json_file=args.json_file, tokenizer=tokenizer)
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
@@ -400,7 +397,7 @@ def main():
                         time.strftime("%Y-%m-%d-%H-%M-%S"), step, lr_scheduler.get_last_lr()[0], avg_loss))
         
         if step % args.save_steps == 0:
-            save_path = os.path.join(args.output_dir, f"checkpoint-{step}")
+            save_path = os.path.join(args.output_dir, 'checkpoints', f"checkpoint-{step}")
             accelerator.save_state(save_path)
         
 

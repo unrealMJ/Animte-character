@@ -11,6 +11,8 @@ def copy_src(output_dir):
     shutil.copytree('con_net/', os.path.join(output_dir, 'con_net'))
     shutil.copytree('ip_adapter/', os.path.join(output_dir, 'ip_adapter'))
     shutil.copytree('config/', os.path.join(output_dir, 'config'))
+    shutil.copytree('train/', os.path.join(output_dir, 'train'))
+    shutil.copytree('inference/', os.path.join(output_dir, 'inference'))
     # gpt生成，判断是否正确
     # 遍历目标目录下的所有文件，并设置文件权限为只读
     # for root, dirs, files in os.walk(output_dir):

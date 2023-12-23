@@ -9,7 +9,7 @@ from torchvision import transforms
 from torchvision.transforms import functional as TF
 import PIL
 from PIL import Image
-from transformers import CLIPImageProcessor
+from transformers import CLIPImageProcessor, AutoImageProcessor
 import json
 from torch.utils.data import IterableDataset, Dataset
 from tqdm import tqdm
@@ -105,34 +105,13 @@ class LaionHumanSD(Dataset):
 
 
 class BaseDataset(Dataset):
-    def __init__(self, json_file, tokenizer, control_type='canny') -> None:
+    def __init__(self, json_file, tokenizer=None, short_size=768, control_type='pose') -> None:
         super().__init__()
         self.tokenizer = tokenizer
-        self.short_size = 512
+        self.short_size = short_size
         self.control_type = control_type
 
         self.data = self.construct_data(json_file)
-
-        # self.image_transform = transforms.Compose([
-        #     transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR),
-        #     transforms.CenterCrop(self.short_size),
-        #     # transforms.RandomCrop(self.short_size),
-        #     transforms.ToTensor(),
-        #     transforms.Normalize([0.5], [0.5]),
-        # ])
-
-        # self.transform = transforms.Compose([
-        #     transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR),
-        #     transforms.RandomCrop(self.short_size),
-        #     transforms.ToTensor(),
-        #     transforms.Normalize([0.5], [0.5]),
-        # ])
-
-        # self.control_transform = transforms.Compose([
-        #     transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR),
-        #     transforms.RandomCrop(self.short_size),
-        #     transforms.ToTensor(),
-        # ])
 
     def construct_data(self, json_file_list):
         if type(json_file_list) == str:
@@ -146,33 +125,29 @@ class BaseDataset(Dataset):
         return data
     
     def image_transform(self, image):
-        image = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(image)
-        image = transforms.CenterCrop(self.short_size)(image)
+        # image = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(image)
+        # image = transforms.CenterCrop(self.short_size)(image)
 
-        i, j, h, w = transforms.RandomCrop.get_params(image, output_size=(512, 512))
+        # i, j, h, w = transforms.RandomCrop.get_params(image, output_size=(512, 512))
         # image = TF.crop(image, i, j, h, w)
 
         image = transforms.ToTensor()(image)
         image = transforms.Normalize([0.5], [0.5])(image)
 
-        return image, i, j, h, w
+        return image
     
     def reference_transform(self, reference):
-        reference = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(reference)
-        reference = transforms.CenterCrop(self.short_size)(reference)
+        # reference = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(reference)
+        # reference = transforms.CenterCrop(self.short_size)(reference)
 
-        # i, j, h, w = transforms.RandomCrop.get_params(reference, output_size=(512, 512))
-        # reference = TF.crop(reference, i, j, h, w)
-        
         reference = transforms.ToTensor()(reference)
         reference = transforms.Normalize([0.5], [0.5])(reference)
 
         return reference
 
-    def control_transform(self, control_image, i, j, h, w):
-        control_image = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(control_image)
-        control_image = transforms.CenterCrop(self.short_size)(control_image)
-        # control_image = TF.crop(control_image, i, j, h, w)
+    def control_transform(self, control_image):
+        # control_image = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(control_image)
+        # control_image = transforms.CenterCrop(self.short_size)(control_image)
         control_image = transforms.ToTensor()(control_image)
         return control_image
 
@@ -201,17 +176,9 @@ class BaseDataset(Dataset):
         reference = reference.resize((width, height))
         control_image = control_image.resize((width, height))
 
-        # print(f'Image size: {image.size}')
-        # print(f'Reference size: {reference.size}')
-        # print(f'Control image size: {control_image.size}')
-
-        image, i, j, h, w = self.image_transform(image)
+        image = self.image_transform(image)
         reference = self.reference_transform(reference)
-        control_image = self.control_transform(control_image, i, j, h, w)
-
-        # print(f'Image shape: {image.shape}')
-        # print(f'Reference shape: {reference.shape}')
-        # print(f'Control image shape: {control_image.shape}')
+        control_image = self.control_transform(control_image)
 
         text_input_ids = self.tokenizer(
             prompt,
@@ -237,6 +204,109 @@ class CCTVDataset(BaseDataset):
 
 
 class TikTokDataset(BaseDataset):
+    def __init__(self, json_file, tokenizer, short_size=768, control_type='pose') -> None:
+        super().__init__(json_file, tokenizer, short_size, control_type)
+
+    def __getitem__(self, idx):
+        item = self.data[idx]
+
+        role_root = item['role_root']
+        all_images = os.listdir(f'{role_root}/images')
+        video_length = len(all_images)
+        
+        reference_idx = random.randint(0, video_length - 1)
+        image_idx = random.randint(0, video_length - 1)
+
+        reference_path = f'{role_root}/images/{str(reference_idx + 1).zfill(4)}.png'
+        image_path = f'{role_root}/images/{str(image_idx + 1).zfill(4)}.png'
+        control_path = f'{role_root}/{self.control_type}/{str(image_idx + 1).zfill(4)}.png'
+
+        reference = Image.open(reference_path).convert("RGB")
+        image = Image.open(image_path).convert("RGB")
+        control_image = Image.open(control_path).convert("RGB")
+
+        reference_prompt = ''
+        # with open(f'{role_root}/prompt/{str(image_idx + 1).zfill(4)}.txt') as f:
+        #     prompt = f.read()
+        prompt = 'best quality,high quality'
+
+        reference = self.reference_transform(reference)
+        image = self.image_transform(image)
+        control_image = self.control_transform(control_image)
+
+        reference_prompt = self.tokenizer(
+            reference_prompt,
+            max_length=self.tokenizer.model_max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        ).input_ids
+        prompt = self.tokenizer(
+            prompt,
+            max_length=self.tokenizer.model_max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        ).input_ids
+        
+        return {
+            'image': image,
+            'text_input_ids': prompt,
+            'reference': reference,
+            'control_image': control_image,
+            'reference_prompt': reference_prompt,
+        }
+
+
+class TikTokDataset2(BaseDataset):
+    '''
+    This class not included text prompt
+    '''
+    def __init__(self, json_file, tokenizer=None, short_size=768, control_type='pose', processor=None) -> None:
+        super().__init__(json_file, tokenizer, short_size, control_type)
+        self.processor = processor
+
+    def __getitem__(self, idx):
+        item = self.data[idx]
+
+        role_root = item['role_root']
+        all_images = os.listdir(f'{role_root}/images')
+        video_length = len(all_images)
+        
+        reference_idx = random.randint(0, video_length - 1)
+        image_idx = random.randint(0, video_length - 1)
+
+        reference_path = f'{role_root}/images/{str(reference_idx + 1).zfill(4)}.png'
+        image_path = f'{role_root}/images/{str(image_idx + 1).zfill(4)}.png'
+        control_path = f'{role_root}/{self.control_type}/{str(image_idx + 1).zfill(4)}.png'
+
+        reference = Image.open(reference_path).convert("RGB")
+        image = Image.open(image_path).convert("RGB")
+        control_image = Image.open(control_path).convert("RGB")
+
+        width, height = image.size
+        width = (width // 8) * 8
+        height = (height // 8) * 8
+
+        image = image.resize((width, height))
+        reference = reference.resize((width, height))
+        control_image = control_image.resize((width, height))
+        
+        global_image = self.processor(images=reference, return_tensors="pt").pixel_values
+
+        reference = self.reference_transform(reference)
+        image = self.image_transform(image)
+        control_image = self.control_transform(control_image)
+        
+        return {
+            'image': image,
+            'global_image': global_image,
+            'reference': reference,
+            'control_image': control_image,
+        }
+        
+
+class UBCFashion(TikTokDataset):
     pass
     
 
@@ -312,7 +382,9 @@ class BaseVideoDataset(Dataset):
             control_image = Image.open(f'{role_root}/{self.control_type}/{idx}.png').convert("RGB")
             control_list.append(control_image)
 
-        reference = copy.deepcopy(image_list[0])
+        reference_path = f'{role_root}/images/0001.png'
+        reference = Image.open(reference_path).convert("RGB")
+        
         if 'prompt' not in item or item['prompt'] == '':
             prompt = 'best quality,high quality'
         else:
@@ -326,7 +398,7 @@ class BaseVideoDataset(Dataset):
         image_list = [image.resize((width, height)) for image in image_list]
         control_list = [control_image.resize((width, height)) for control_image in control_list]
 
-        # TODO: support random crop, keep consistency image and control
+        # TODO: support random crop, keep consistency between image and control
         reference = self.reference_transform(reference)
         image_list = [self.image_transform(image) for image in image_list]
         control_list = [self.control_transform(control_image) for control_image in control_list]

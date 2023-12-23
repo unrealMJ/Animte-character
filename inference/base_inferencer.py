@@ -19,11 +19,14 @@ import torchvision.transforms as transforms
 import einops
 
 
-class Inference:
-    def __init__(self, cfg) -> None:
-        self.cfg = cfg
+class BaseInferencer:
+    def __init__(self) -> None:
+        self.cfg = self.parse_args()
         
-        self.tokenizer = CLIPTokenizer.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="tokenizer")
+        try:
+            self.tokenizer = CLIPTokenizer.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="tokenizer")
+        except:
+            self.tokenizer = None
         self.validate_data = self.construct_data()
         
         self.to_k_hook = []
@@ -32,7 +35,7 @@ class Inference:
         self.k_idx = 0
         self.v_idx = 0
 
-    def build_pipe(self, path):
+    def build_pipe(self):
         if self.cfg.control_type == 'canny':
             controlnet = ControlNetModel.from_pretrained(self.cfg.canny_controlnet)
         elif self.cfg.control_type == 'pose':
@@ -43,6 +46,7 @@ class Inference:
         controlnet = controlnet.to(dtype=torch.float16)
 
         reference_net = UNet2DConditionModel.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="unet")
+        path = os.path.join(self.cfg.output_dir, f'checkpoints/checkpoint-{self.cfg.step}/pytorch_model.bin')
         state_dict = torch.load(path, map_location='cpu')
         reference_net.load_state_dict(state_dict)
         reference_net = reference_net.to(dtype=torch.float16, device='cuda')
@@ -60,22 +64,6 @@ class Inference:
         # vae_model_path = "/mnt/petrelfs/majie/model_checkpoint/sd-vae-ft-mse"
         # infer_vae = AutoencoderKL.from_pretrained(vae_model_path).to(dtype=torch.float16)
 
-        # pipe = StableDiffusionPipeline.from_pretrained(
-        #     pretrained_model_name_or_path=self.cfg.pretrained_model_name_or_path,
-        #     torch_dtype=torch.float16,
-        #     scheduler=ddim_scheduler,
-        #     feature_extractor=None,
-        #     safety_checker=None
-        # )
-
-        # pipe = StableDiffusionPipeline.from_single_file(
-        #     '/mnt/petrelfs/majie/model_checkpoint/AbyssOrangeMix2_sfw.safetensors',
-        #     torch_dtype=torch.float16,
-        #     scheduler=ddim_scheduler,
-        #     feature_extractor=None,
-        #     safety_checker=None
-        # )
-
         pipe = StableDiffusionControlNetPipeline.from_pretrained(
             pretrained_model_name_or_path=self.cfg.pretrained_model_name_or_path,
             # vae=infer_vae,
@@ -85,23 +73,20 @@ class Inference:
             feature_extractor=None,
             safety_checker=None
         )
-
         pipe.enable_model_cpu_offload()
+
         self.pipe = pipe
         self.reference_net = reference_net
 
     def construct_data(self):
-        tokenizer = CLIPTokenizer.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="tokenizer")
-        dataset = BaseDataset(json_file=self.cfg.json_file, tokenizer=tokenizer, control_type=self.cfg.control_type)
+        dataset = BaseDataset(json_file=self.cfg.json_file, tokenizer=self.tokenizer, control_type=self.cfg.control_type)
         return dataset
 
-    def validate(self, exp_dir, step):
+    def validate(self):
+        exp_dir = self.cfg.output_dir
+        step = self.cfg.step
         for i in range(len(self.validate_data.data)):
-            # if i > 10:
-            #     break
-            # j = random.randint(0, len(validate_data.data) - 1)
-            j = i
-            item = self.validate_data.data[j]
+            item = self.validate_data.data[i]
 
             image = Image.open(item['image']).convert("RGB")
             reference = Image.open(item['reference']).convert("RGB")
@@ -116,13 +101,13 @@ class Inference:
             grid = self.single_image_infer(reference, prompt, control_image)
             self.save(grid, prompt, exp_dir, step)
     
-    def save(self, grid, prompt, exp_dir, step):
+    def save(self, grid, filename, exp_dir, step):
         os.makedirs(f'{exp_dir}/{step}', exist_ok=True)
-        prompt = prompt.replace('/', '')[:100]
+        filename = filename.replace('/', '')[:100]
         current_time = time.strftime("%Y-%m-%d-%H-%M-%S")
-        grid.save(f'{exp_dir}/{step}/{prompt}_{current_time}.png')
+        grid.save(f'{exp_dir}/{step}/{current_time}_{filename}.png')
 
-    def single_image_infer(self, reference, prompt, control_image):
+    def single_image_infer(self, reference, prompt, control_image, return_raw=False):
         width, height = reference.size
         width = (width // 8) * 8
         height = (height // 8) * 8
@@ -131,22 +116,15 @@ class Inference:
 
         self.reference_forward(reference, prompt)
 
-        reference_tmp = reference
-        # control_image_tmp = control_image
+        results = self.pipe(prompt=prompt, width=width, height=height, num_inference_steps=50, image=control_image, num_images_per_prompt=4).images
 
-        # reference = transforms.ToTensor()(reference)
-        # reference = transforms.Normalize([0.5], [0.5])(reference)
-
-        # control_image = transforms.ToTensor()(control_image)
-
-        # reference = reference.unsqueeze(0)
-        # control_image = control_image.unsqueeze(0)
-
-        results = self.pipe(prompt=prompt, width=width, height=height, num_inference_steps=50, num_images_per_prompt=4, image=control_image).images
-
-        all_images = [reference_tmp] + [control_image] + results
+        all_images = [reference] + [control_image] + results
         grid = image_grid(all_images, 1, 6)
-        return grid
+        
+        if return_raw:
+            return all_images
+        else:
+            return grid
     
     def reference_forward(self, reference_image, prompt):
         self.reset_hook()
@@ -237,24 +215,35 @@ class Inference:
         self.to_k_hook.clear()
         self.to_v_hook.clear()
 
+    def parse_args(self):
+        parser = argparse.ArgumentParser(description="Simple example of a training script.")
+        parser.add_argument(
+            "--config",
+            type=str,
+            default='config/inference/base.yaml',
+        )
+        
+        # args = parser.parse_args()
+        args, unknown = parser.parse_known_args()
 
+        cfg = OmegaConf.load(args.config)
+        if unknown:
+            for arg in unknown:
+                if '=' not in arg:
+                    continue
+                key, value = arg.split('=')
+                # print(f'update {key} from {getattr(cfg, key)} to {value}')
+                setattr(cfg, key, value)
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Simple example of a training script.")
-    parser.add_argument(
-        "--config",
-        type=str,
-        default='config/inference/base.yaml',
-    )
-    
-    args = parser.parse_args()
+        if hasattr(cfg, 'step'):
+            assert type(cfg.step) == str, f'{type(cfg.step)}'
+            cfg.step = int(cfg.step)
 
-    cfg = OmegaConf.load(args.config)
-    # TODO: check argparse.Namespace 的使用方法
-    # args = argparse.Namespace(**cfg, **vars(args))
-    for k, v in cfg.items():
-        setattr(args, k, v)
-    return args
+        # TODO: check argparse.Namespace 的使用方法
+        # args = argparse.Namespace(**cfg, **vars(args))
+        for k, v in cfg.items():
+            setattr(args, k, v)
+        return args
 
 
 if __name__ == '__main__':
@@ -263,30 +252,26 @@ if __name__ == '__main__':
 
     exp_dir = args.output_dir
 
-    # steps = list(range(0, 1000, 200))
-    # steps = [7000]
-    # for step in steps:
-    #     infer = Inference(args)
-    #     infer.build_pipe(os.path.join(exp_dir, f'checkpoints/checkpoint-{step}/pytorch_model.bin'))
-    #     infer.make_hook()
-    #     infer.validate(exp_dir, step)
+    steps = list(range(0, 1000, 200))
+    steps = [25000, 20000]
+    for step in steps:
+        infer = Inference(args)
+        infer.build_pipe(os.path.join(exp_dir, f'checkpoints/checkpoint-{step}/pytorch_model.bin'))
+        infer.make_hook()
+        infer.validate(exp_dir, step)
 
     # single image
-    step = 25000
-    infer = Inference(args)
-    infer.build_pipe(os.path.join(exp_dir, f'checkpoint-{step}/pytorch_model.bin'))
-    infer.make_hook()
-    prompt = 'best quality,high quality,1boy'
-    # prompt = 'best quality,high quality'
+    # step = 21000
+    # infer = Inference(args)
+    # infer.build_pipe(os.path.join(exp_dir, f'checkpoint-{step}/pytorch_model.bin'))
+    # infer.make_hook()
+    # prompt = '1girl,upper body,cry,sad'
 
-    # reference_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/keli/15_prompt.png'
-    # control_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/keli/canny1.png'
+    # reference_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/0.png'
+    # control_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/pose2.png'
 
-    reference_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/cctv_nantong/nantong_ref_480.jpg'
-    control_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/cctv_nantong/pose/左45.png'
+    # reference = Image.open(reference_path).convert("RGB")
+    # control_image = Image.open(control_path).convert("RGB")
 
-    reference = Image.open(reference_path).convert("RGB")
-    control_image = Image.open(control_path).convert("RGB")
-
-    grid = infer.single_image_infer(reference, prompt, control_image)
-    infer.save(grid, prompt, exp_dir, step)
+    # grid = infer.single_image_infer(reference, prompt, control_image)
+    # infer.save(grid, prompt, exp_dir, step)
