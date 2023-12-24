@@ -21,20 +21,18 @@ class Inferencer(BaseInferencer):
         pass
 
     def build_pipe(self):
-        if self.cfg.control_type == 'canny':
-            controlnet = ControlNetModel.from_pretrained(self.cfg.canny_controlnet)
-        elif self.cfg.control_type == 'pose':
-            controlnet = ControlNetModel.from_pretrained(self.cfg.pose_controlnet)
+        if hasattr(self.cfg, 'reference_path'):
+            reference_path = self.cfg.reference_path
         else:
-            raise NotImplementedError
-
-        controlnet = controlnet.to(dtype=torch.float16)
-
+            reference_path = os.path.join(self.cfg.output_dir, f'checkpoints/checkpoint-{self.cfg.step}/pytorch_model.bin')
+        
         reference_net = UNet2DConditionModel.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="unet")
-        path = os.path.join(self.cfg.output_dir, f'checkpoints/checkpoint-{self.cfg.step}/pytorch_model.bin')
-        state_dict = torch.load(path, map_location='cpu')
+        state_dict = torch.load(reference_path, map_location='cpu')
         reference_net.load_state_dict(state_dict)
         reference_net = reference_net.to(dtype=torch.float16, device='cuda')
+        
+        controlnet = ControlNetModel.from_pretrained(self.MODELS[self.cfg.control_type])
+        controlnet = controlnet.to(dtype=torch.float16)
         
         ddim_scheduler = DDIMScheduler(
             num_train_timesteps=1000,

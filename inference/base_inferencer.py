@@ -20,6 +20,13 @@ import einops
 
 
 class BaseInferencer:
+    
+    MODELS = {
+        'pose': '/mnt/petrelfs/majie/model_checkpoint/controlnet_diffuser/control_v11p_sd15_openpose',
+        'canny': 'lllyasviel/control_v11p_sd15_canny'
+    }
+    
+    
     def __init__(self) -> None:
         self.cfg = self.parse_args()
         

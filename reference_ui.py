@@ -31,7 +31,6 @@ class GradioPipeline:
 
     def generate(self, reference, prompt, control_image):
         print(f'Generate')
-        # return [reference]
         all_images = self.inferencer.single_image_infer(reference, prompt, control_image, return_raw=True)
         self.save(all_images)
         return all_images
@@ -46,18 +45,18 @@ class GradioPipeline:
 
 pipe = GradioPipeline()
 
-sd_list = ['anythingV3_fp16.ckpt', 'animesfw-final-pruned.ckpt', 'Realistic_Vision_V4.0_fp16-no-ema.safetensors', 'stable-diffusion-v1-5']
-ip_weight_list = ['2023-11-16-10-15', '2023-11-18-09-37', '2023-11-21-11-32', '2023-11-21-12-14']
+# sd_list = ['anythingV3_fp16.ckpt', 'animesfw-final-pruned.ckpt', 'Realistic_Vision_V4.0_fp16-no-ema.safetensors', 'stable-diffusion-v1-5']
+# ip_weight_list = ['2023-11-16-10-15', '2023-11-18-09-37', '2023-11-21-11-32', '2023-11-21-12-14']
 
 with gr.Blocks() as demo:
-    with gr.Row():
-        sd_checkpoint = gr.Dropdown(label="Checkpoint", choices=sd_list)
-        ip_adapter_path = gr.Dropdown(label="IP path", choices=ip_weight_list)
-        step = gr.Dropdown(label="Step", choices=list(range(0, 50000, 2000)))
-        load_btn = gr.Button("Load")
-    with gr.Row():
-        batch_size = gr.Number(label="Batch Size", minimum=1, maximum=8, precision=0, value=4)
-        enable_controlnet = gr.Checkbox(label="Enable ControlNet")
+    # with gr.Row():
+    #     sd_checkpoint = gr.Dropdown(label="Checkpoint", choices=sd_list)
+    #     ip_adapter_path = gr.Dropdown(label="IP path", choices=ip_weight_list)
+    #     step = gr.Dropdown(label="Step", choices=list(range(0, 50000, 2000)))
+    #     load_btn = gr.Button("Load")
+    # with gr.Row():
+    #     batch_size = gr.Number(label="Batch Size", minimum=1, maximum=8, precision=0, value=4)
+    #     enable_controlnet = gr.Checkbox(label="Enable ControlNet")
     with gr.Row():
         prompt = gr.Textbox(label="Prompt", lines=3, value='best quality,high quality')
         generate_btn = gr.Button("Generate")
