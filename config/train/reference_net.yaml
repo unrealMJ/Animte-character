@@ -2,7 +2,8 @@ pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffu
 image_encoder_path: /mnt/petrelfs/majie/project/IP-Adapter/IP-Adapter/models/image_encoder
 motion_path: guoyww/animatediff-motion-adapter-v1-5-2
 json_file: 
-  - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/tiktok_all.jsonl
+  # - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/tiktok_all.jsonl
+  /mnt/petrelfs/majie/project/My-IP-Adapter/data/UBC/video/train.jsonl
 
 
 control_type: pose

@@ -91,7 +91,7 @@ class Inferencer(BaseInferencer):
             grid = self.single_image_infer(reference, prompt, control_image)
             self.save(grid, prompt, exp_dir, step)
 
-    def single_image_infer(self, reference, prompt, control_image):
+    def single_image_infer(self, reference, prompt, control_image, return_raw=False):
         width, height = reference.size
         width = (width // 8) * 8
         height = (height // 8) * 8
@@ -104,6 +104,8 @@ class Inferencer(BaseInferencer):
 
         all_images = [reference] + [control_image] + results
         grid = image_grid(all_images, 1, 6)
+        if return_raw:
+            return all_images
         return grid
     
     def reference_forward(self, reference_image, prompt):

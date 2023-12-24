@@ -52,12 +52,12 @@ class Trainer(BaseTrainer):
             "images": images,
             "text_input_ids": text_input_ids,
             "references": references,
-            "control_image": control_image,
+            "control_images": control_image,
         }
 
     def build_data(self):
         # dataloader
-        train_dataset = TikTokDataset2(json_file=self.cfg.json_file)
+        train_dataset = UBCFashionDataset(json_file=self.cfg.json_file, tokenizer=self.tokenizer)
         self.train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
             shuffle=True,

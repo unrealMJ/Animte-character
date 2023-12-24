@@ -257,7 +257,7 @@ class TikTokDataset(BaseDataset):
             'reference_prompt': reference_prompt,
         }
 
-
+# not return text prompt
 class TikTokDataset2(BaseDataset):
     '''
     This class not included text prompt
@@ -306,8 +306,32 @@ class TikTokDataset2(BaseDataset):
         }
         
 
-class UBCFashion(TikTokDataset):
-    pass
+class UBCFashionDataset(TikTokDataset):
+    def __init__(self, json_file, tokenizer, short_size=768, control_type='pose') -> None:
+        super().__init__(json_file, tokenizer, short_size, control_type)
+        self.short_size = (720, 920)
+
+    def image_transform(self, image):
+        image = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(image)
+
+        image = transforms.ToTensor()(image)
+        image = transforms.Normalize([0.5], [0.5])(image)
+
+        return image
+    
+    def reference_transform(self, reference):
+        reference = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(reference)
+
+        reference = transforms.ToTensor()(reference)
+        reference = transforms.Normalize([0.5], [0.5])(reference)
+
+        return reference
+
+    def control_transform(self, control_image):
+        control_image = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(control_image)
+
+        control_image = transforms.ToTensor()(control_image)
+        return control_image
     
 
 class BaseVideoDataset(Dataset):

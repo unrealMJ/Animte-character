@@ -1,10 +1,11 @@
-# pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
-pretrained_model_name_or_path: 'xyn-ai/anything-v4.0'
+pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
+# pretrained_model_name_or_path: 'xyn-ai/anything-v4.0'
 
 control_type: pose
 
 canny_controlnet: lllyasviel/control_v11p_sd15_canny
-pose_controlnet: lllyasviel/control_v11p_sd15_openpose
+# pose_controlnet: lllyasviel/control_v11p_sd15_openpose
+pose_controlnet: /mnt/petrelfs/majie/model_checkpoint/controlnet_diffuser/control_v11p_sd15_openpose
 lineart_controlnet: ControlNet-1-1-preview/control_v11p_sd15_lineart
 
 

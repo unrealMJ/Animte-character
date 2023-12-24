@@ -13,10 +13,10 @@ from inference.validate_reference import Inferencer
 
 class GradioPipeline:
     def __init__(self):
-        # self.inferencer = Inferencer()
+        self.inferencer = Inferencer()
         
-        # self.inferencer.build_pipe()
-        # self.inferencer.make_hook()
+        self.inferencer.build_pipe()
+        self.inferencer.make_hook()
         pass
 
 
@@ -31,7 +31,7 @@ class GradioPipeline:
 
     def generate(self, reference, prompt, control_image):
         print(f'Generate')
-        return [reference]
+        # return [reference]
         all_images = self.inferencer.single_image_infer(reference, prompt, control_image, return_raw=True)
         self.save(all_images)
         return all_images
@@ -70,8 +70,8 @@ with gr.Blocks() as demo:
     generate_btn.click(
         fn=pipe.generate,
         inputs=[
-            prompt,
             reference,
+            prompt,
             control_iamge
         ],
         outputs=output

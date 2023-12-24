@@ -37,7 +37,7 @@ class BaseTrainer:
         
         pass
     
-    def parse_args():
+    def parse_args(self):
         parser = argparse.ArgumentParser(description="Simple example of a training script.")
         parser.add_argument(
             "--config",
