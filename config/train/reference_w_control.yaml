@@ -1,0 +1,31 @@
+# pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
+pretrained_model_name_or_path: /mnt/petrelfs/liuwenran/.cache/huggingface/hub/models--runwayml--stable-diffusion-v1-5/snapshots/ded79e214aa69e42c24d3f5ac14b76d568679cc2
+image_encoder_path: /mnt/petrelfs/majie/project/IP-Adapter/IP-Adapter/models/image_encoder
+json_file: /mnt/petrelfs/share_data/majie/Aesthetics_Human/mapping_file_training.json
+data_root: /mnt/petrelfs/share_data/majie/
+
+use_control: True
+control_type: canny
+canny_controlnet: lllyasviel/control_v11p_sd15_canny
+pose_controlnet: lllyasviel/control_v11p_sd15_openpose
+hed_controlnet: lllyasviel/sd-controlnet-hed
+lineart_controlnet: ControlNet-1-1-preview/control_v11p_sd15_lineart
+
+mixed_precision: fp16
+train_batch_size: 16
+dataloader_num_workers: 4
+
+learning_rate: 1e-5
+weight_decay: 0.01
+
+lr_scheduler: cosine
+lr_warmup_steps: 2000
+num_train_steps: 30000
+
+save_steps: 5000
+log_steps: 100
+output_dir: output/reference_w_control
+validate_steps: 100
+validate_size: 512
+
+resume: null
