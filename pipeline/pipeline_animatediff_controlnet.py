@@ -817,7 +817,7 @@ class AnimateDiffControlNetPipeline(DiffusionPipeline, TextualInversionLoaderMix
                     control_model_input,
                     t,
                     encoder_hidden_states=control_encoder_hidden_states,
-                    controlnet_cond=image,  # this is video [b c f h w]
+                    controlnet_cond=image,  # this is video [(b f) c h w]
                     conditioning_scale=cond_scale,
                     guess_mode=guess_mode,
                     return_dict=False,

@@ -231,7 +231,7 @@ def main():
     # register unet hook
     def to_k2_forward(module, input_, output_):
         # output_: [b*f, h*w, c]
-        # tmp: [b, h*w, c]
+        # tmp: [b, h*w, c] b=1
         tmp = to_k_hook.pop()
         tmp = tmp[:, None]  # [b, 1, h*w, c]
         tmp = tmp.repeat(1, args.num_frames, 1, 1)  # [b, f, h*w, c]
@@ -290,7 +290,7 @@ def main():
                 # reference image
                 reference_image = batch["references"].to(accelerator.device,dtype=weight_dtype)
                 reference_latents = vae.encode(reference_image).latent_dist.sample()
-                reference_latents = reference_latents * vae.config.scaling_factor
+                reference_latents = reference_latents * vae.config.scaling_factor  # [b, c, h, w] b=1
 
             # Sample noise that we'll add to the latents
             noise = torch.randn_like(latents)  # [b, c, f, h, w]
@@ -301,7 +301,7 @@ def main():
 
             # Add noise to the latents according to the noise magnitude at each timestep
             # (this is the forward diffusion process)
-            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)  # [b, c, f, h, w]
         
             with torch.no_grad():
                 encoder_hidden_states = text_encoder(batch["text_input_ids"].to(accelerator.device))[0]
@@ -312,6 +312,8 @@ def main():
             # print(f'control_image {control_image.shape}')
             # print(f'noisy_latents {einops.rearrange(noisy_latents, "b c f h w -> (b f) c h w").shape}')
 
+            # timesteps的shape是（bs），表示为每个图片加不同程度的噪声
+            # video的bs是1，frame是24，所以timesteps需要扩展到24
             control_timesteps = timesteps[:, None].repeat(1, video_length).reshape(-1)
             control_encoder_hidden_states = encoder_hidden_states[:, None].repeat(1, video_length, 1, 1)
             control_encoder_hidden_states = einops.rearrange(control_encoder_hidden_states, 'b f l c -> (b f) l c')

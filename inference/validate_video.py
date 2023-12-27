@@ -123,7 +123,7 @@ class Inference:
         os.makedirs(save_dir, exist_ok=True)
         prompt = prompt.replace('/', '')[:100]
         reference.save(f'{save_dir}/reference.png')
-        # export_to_gif(control_video, f'{exp_dir}/{step}/{current_time}/reference.gif')
+        export_to_gif(control_video, f'{save_dir}/control.gif')
         export_to_gif(result, f'{save_dir}/{prompt}.gif')
 
         os.makedirs(f'{save_dir}/frames', exist_ok=True)
@@ -267,7 +267,7 @@ if __name__ == '__main__':
     exp_dir = args.output_dir
 
     # single image
-    step = 26000
+    step = 25000
     infer = Inference(args)
     reference_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/output/reference_net/2023-12-04-17-27/checkpoint-30000/pytorch_model.bin'
     motion_path = os.path.join(exp_dir, f'checkpoint-{step}/pytorch_model.bin')
@@ -279,12 +279,14 @@ if __name__ == '__main__':
     # load data
     sample_n_frames = args.num_frames
     sample_stride = 4
-    role_root = '/mnt/petrelfs/majie/project/diffusers/my_project/identity/TikTok/TikTok_dataset/00122'
+    # role_root = '/mnt/petrelfs/majie/project/diffusers/my_project/identity/TikTok/TikTok_dataset/00122'
+    role_root = '/mnt/petrelfs/majie/project/diffusers/my_project/identity/aux_data/wechat-group/1'
     all_images = os.listdir(f'{role_root}/images')
     video_length = len(all_images)
     
     clip_length = min(video_length, (sample_n_frames - 1) * sample_stride + 1)
     start_idx = random.randint(0, video_length - clip_length)
+    # start_idx = 40
     batch_index = np.linspace(start_idx, start_idx + clip_length - 1, sample_n_frames, dtype=int)
 
     control_video = []

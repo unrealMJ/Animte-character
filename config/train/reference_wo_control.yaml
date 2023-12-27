@@ -1,9 +1,13 @@
 pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
 image_encoder_path: /mnt/petrelfs/majie/project/IP-Adapter/IP-Adapter/models/image_encoder
-json_file: /mnt/petrelfs/majie/project/My-IP-Adapter/data/mapping_file_training.json
+json_file: 
+  # - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/tiktok_all.jsonl
+  - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/video/video.jsonl
+  # - /mnt/petrelfs/majie/project/My-IP-Adapter/data/mapping_file_training.json
+
 
 mixed_precision: fp16
-train_batch_size: 16
+train_batch_size: 8
 dataloader_num_workers: 4
 
 learning_rate: 1e-4

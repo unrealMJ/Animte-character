@@ -231,9 +231,6 @@ def main():
         tracker_config.pop('json_file') # remove list type
         accelerator.init_trackers("controlnet", config=tracker_config)
 
-    # Load Metric
-    # metric = Metric(device=accelerator.device)
-
     # Load scheduler, tokenizer and models.
     noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
     tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer")

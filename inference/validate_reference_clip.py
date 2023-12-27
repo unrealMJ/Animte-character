@@ -6,34 +6,45 @@ from PIL import Image
 import os
 
 from transformers import CLIPTokenizer
+from transformers import AutoImageProcessor, AutoModel, CLIPImageProcessor
+from con_net.model.dino import DINO
 
 from con_net.dataset.dataset2 import LaionHumanSD, CCTVDataset, BaseDataset
 from con_net.utils import copy_src, image_grid
 
+import yaml
+import argparse
+import random
+import time
+from omegaconf import OmegaConf
 import torchvision.transforms as transforms
 import einops
 from inference.base_inferencer import BaseInferencer
+from pipeline.pipeline_stable_diffusion_image_variation_controlnet import StableDiffusionImageVariationControlNetPipeline
 
 
 class Inferencer(BaseInferencer):
     def __init__(self) -> None:
         super().__init__()
-        pass
+        self.processor = CLIPImageProcessor.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder='feature_extractor')
 
-    def build_pipe(self):
-        if hasattr(self.cfg, 'reference_path'):
-            reference_path = self.cfg.reference_path
+
+    def build_pipe(self, path):
+        if self.cfg.control_type == 'canny':
+            controlnet = ControlNetModel.from_pretrained(self.cfg.canny_controlnet)
+        elif self.cfg.control_type == 'pose':
+            controlnet = ControlNetModel.from_pretrained(self.cfg.pose_controlnet)
         else:
-            reference_path = os.path.join(self.cfg.output_dir, f'checkpoints/checkpoint-{self.cfg.step}/pytorch_model.bin')
-        
+            raise NotImplementedError
+
+        controlnet = controlnet.to(dtype=torch.float16)
+
         reference_net = UNet2DConditionModel.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="unet")
-        state_dict = torch.load(reference_path, map_location='cpu')
+        state_dict = torch.load(path, map_location='cpu')
         reference_net.load_state_dict(state_dict)
         reference_net = reference_net.to(dtype=torch.float16, device='cuda')
-        
-        controlnet = ControlNetModel.from_pretrained(self.MODELS[self.cfg.control_type])
-        controlnet = controlnet.to(dtype=torch.float16)
-        
+        self.reference_net = reference_net
+
         ddim_scheduler = DDIMScheduler(
             num_train_timesteps=1000,
             beta_start=0.00085,
@@ -47,34 +58,23 @@ class Inferencer(BaseInferencer):
         # vae_model_path = "/mnt/petrelfs/majie/model_checkpoint/sd-vae-ft-mse"
         # infer_vae = AutoencoderKL.from_pretrained(vae_model_path).to(dtype=torch.float16)
 
-        pipe = StableDiffusionControlNetPipeline.from_pretrained(
+        pipe = StableDiffusionImageVariationControlNetPipeline.from_pretrained(
             pretrained_model_name_or_path=self.cfg.pretrained_model_name_or_path,
             # vae=infer_vae,
             controlnet=controlnet,
             torch_dtype=torch.float16,
             scheduler=ddim_scheduler,
-            feature_extractor=None,
             safety_checker=None
         )
         pipe.enable_model_cpu_offload()
 
         self.pipe = pipe
-        self.reference_net = reference_net
 
-    def construct_data(self):
-        tokenizer = CLIPTokenizer.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="tokenizer")
-        dataset = BaseDataset(json_file=self.cfg.json_file, tokenizer=tokenizer, control_type=self.cfg.control_type)
-        return dataset
-
-    def validate(self):
-        exp_dir = self.cfg.output_dir
-        step = self.cfg.step
+    def validate(self, exp_dir, step):
         for i in range(len(self.validate_data.data)):
-            # if i > 10:
-            #     break
-            # j = random.randint(0, len(validate_data.data) - 1)
-            j = i
-            item = self.validate_data.data[j]
+            if i > 10:
+                break
+            item = self.validate_data.data[i]
 
             image = Image.open(item['image']).convert("RGB")
             reference = Image.open(item['reference']).convert("RGB")
@@ -85,29 +85,29 @@ class Inferencer(BaseInferencer):
             else:
                 raise NotImplementedError
 
-            prompt = 'best quality'
-            grid = self.single_image_infer(reference, prompt, control_image)
-            self.save(grid, prompt, exp_dir, step)
+            grid = self.single_image_infer(reference, control_image, global_image=reference)
+            self.save(grid, '', exp_dir, step)
 
-    def single_image_infer(self, reference, prompt, control_image, return_raw=False):
+    def single_image_infer(self, reference, control_image, global_image):
         width, height = reference.size
         width = (width // 8) * 8
         height = (height // 8) * 8
         reference = reference.resize((width, height), Image.BILINEAR)
         control_image = control_image.resize((width, height), Image.BILINEAR)
 
-        self.reference_forward(reference, prompt)
+        self.reference_forward(reference, global_image)
 
-        results = self.pipe(prompt=prompt, width=width, height=height, num_inference_steps=50, image=control_image, num_images_per_prompt=4).images
+        results = self.pipe(image=global_image, control_image=control_image, width=width, height=height, num_inference_steps=50, num_images_per_prompt=4).images
 
         all_images = [reference] + [control_image] + results
         grid = image_grid(all_images, 1, 6)
-        if return_raw:
-            return all_images
+        
         return grid
-    
-    def reference_forward(self, reference_image, prompt):
+
+
+    def reference_forward(self, reference_image, global_image):
         self.reset_hook()
+
         reference = transforms.ToTensor()(reference_image)
         reference = transforms.Normalize([0.5], [0.5])(reference)
         reference = reference.unsqueeze(0)
@@ -116,42 +116,21 @@ class Inferencer(BaseInferencer):
         reference_latents = self.pipe.vae.encode(reference).latent_dist.sample()
         reference_latents = reference_latents * self.pipe.vae.config.scaling_factor
 
-        text_input_ids = self.tokenizer(
-            prompt,
-            max_length=self.tokenizer.model_max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt"
-        ).input_ids
-        text_input_ids = text_input_ids[None].to('cuda')
-
-        encoder_hidden_states = self.pipe.text_encoder(text_input_ids)[0]
-        
         timesteps = torch.tensor([0]).long().to('cuda')
 
-        _ = self.reference_net(reference_latents, timesteps, encoder_hidden_states=encoder_hidden_states).sample
+        global_image = self.processor(global_image, return_tensors="pt").pixel_values.to('cuda', dtype=torch.float16)
+        encoder_hiden_states = self.pipe.image_encoder(global_image).image_embeds  # [b, 1, 768]
+        encoder_hiden_states = encoder_hiden_states.unsqueeze(1)
 
+        _ = self.reference_net(reference_latents, timesteps, encoder_hidden_states=encoder_hiden_states)
+        
 
 if __name__ == '__main__':
-    # steps = list(range(0, 1000, 200))
-    # steps = [25000, 20000]
-    # for step in steps:
-    #     infer = Inferencer()
-    #     infer.build_pipe(step)
-    #     infer.make_hook()
-    #     infer.validate(step)
-
-    # single image
     inferencer = Inferencer()
-    inferencer.build_pipe()
+    step = 30000
+    # exp_dir = inferencer.cfg.output_dir
+    exp_dir = 'output/reference_clip/2023-12-20-21-32'
+    # exp_dir = os.path.join(inferencer.cfg.output_dir, 'checkpoints', f'checkpoint-{step}/pytorch_model.bin')
+    inferencer.build_pipe(os.path.join(exp_dir, 'checkpoints', f'checkpoint-{step}/pytorch_model.bin'))
     inferencer.make_hook()
-    prompt = '1girl,upper body,cry,sad'
-
-    reference_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/0.png'
-    control_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/pose2.png'
-
-    reference = Image.open(reference_path).convert("RGB")
-    control_image = Image.open(control_path).convert("RGB")
-
-    grid = inferencer.single_image_infer(reference, prompt, control_image)
-    inferencer.save(grid, prompt, inferencer.cfg.output_dir, inferencer.cfg.step)
+    inferencer.validate(exp_dir, step)

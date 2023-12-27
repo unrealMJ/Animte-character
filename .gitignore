@@ -9,3 +9,6 @@ ui_output/*
 animate.egg-info/*
 
 results/
+*.ckpt
+
+*.safetensors
