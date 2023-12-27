@@ -7,3 +7,5 @@ data/*
 ui_output/*
 
 animate.egg-info/*
+
+results/

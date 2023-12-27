@@ -23,17 +23,33 @@ from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from diffusers.optimization import get_scheduler
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection, CLIPVisionModel
 
-from con_net.dataset.dataset2 import LaionHumanSD, CCTVDataset, TikTokDataset, BaseDataset
+from con_net.dataset.dataset_laionhuman_w_control import LaionHumanSD, CCTVDataset, TikTokDataset, BaseDataset
 from con_net.metric import Metric
 from con_net.utils import copy_src, image_grid
 from omegaconf import OmegaConf
 from inference.validate_wo_control import Inference
 import torchvision.transforms as transforms
 import einops
-
+from controlnet_aux import HEDdetector
+import numpy as np
+import cv2
 
 logger = get_logger(__name__)
 logger.setLevel(logging.INFO)
+
+
+def collate_fn_control(data):
+    images = torch.stack([example["image"] for example in data])
+    text_input_ids = torch.cat([example["text_input_ids"] for example in data], dim=0)
+    references = torch.stack([example["reference"] for example in data])
+    control_images = torch.stack([example["control_image"] for example in data])
+
+    return {
+        "images": images,
+        "text_input_ids": text_input_ids,
+        "references": references,
+        "control_images": control_images,
+    }
 
 
 def collate_fn(data):
@@ -46,7 +62,7 @@ def collate_fn(data):
         "text_input_ids": text_input_ids,
         "references": references,
     }
-    
+
     
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
@@ -108,9 +124,13 @@ def validate_save(grid, prompt, exp_dir, step):
     grid.save(f'{exp_dir}/{step}/{prompt}_{current_time}.png')
 
 
-def validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook):
+def validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook, use_control, control_type):
     val_image_lines = open('data/validate_images.txt').readlines()
     val_prompt_lines = open('data/validate_prompts.txt').readlines()
+
+    if use_control:
+        if control_type == 'hed':
+            hed = HEDdetector.from_pretrained('lllyasviel/ControlNet')
 
     for i in range(len(val_image_lines)):
         image = val_image_lines[i].strip()
@@ -121,7 +141,7 @@ def validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook):
         width = args.validate_size
         height = args.validate_size
         reference = reference_image.resize((width, height), Image.BILINEAR)
-        # control_image = control_image.resize((width, height), Image.BILINEAR)
+        raw_image = reference
 
         reference = transforms.ToTensor()(reference)
         reference = transforms.Normalize([0.5], [0.5])(reference)
@@ -145,15 +165,6 @@ def validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook):
         timesteps = torch.tensor([0]).long().to('cuda')
         _ = reference_net(reference_latents, timesteps, encoder_hidden_states=encoder_hidden_states).sample
 
-        # control_image_tmp = control_image
-
-        # reference = transforms.ToTensor()(reference)
-        # reference = transforms.Normalize([0.5], [0.5])(reference)
-
-        # control_image = transforms.ToTensor()(control_image)
-
-        # reference = reference.unsqueeze(0)
-        # control_image = control_image.unsqueeze(0)
         for i in range(len(to_k_hook)):
             feature = to_k_hook[i]
             feature = einops.repeat(feature, 'b l c -> (b n) l c', n=8)
@@ -164,7 +175,20 @@ def validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook):
             feature = einops.repeat(feature, 'b l c -> (b n) l c', n=8)
             to_v_hook[i] = feature
 
-        results = pipeline(prompt=prompt, width=width, height=height, num_inference_steps=50, num_images_per_prompt=4).images
+        if use_control:
+            if control_type == 'canny':
+                control_image = np.array(raw_image)
+                control_image = cv2.Canny(control_image, 100, 200)
+                control_image = control_image[:, :, None]
+                control_image = np.concatenate([control_image, control_image, control_image], axis=2)
+                control_image = Image.fromarray(control_image)
+            elif control_type == 'hed':
+                control_image = hed(image)
+
+            control_image = control_image.resize((width, height), Image.BILINEAR)
+            results = pipeline(prompt=prompt, width=width, height=height, image=control_image, num_inference_steps=50, num_images_per_prompt=4).images
+        else:
+            results = pipeline(prompt=prompt, width=width, height=height, num_inference_steps=50, num_images_per_prompt=4).images
 
         # reset hook list !!!!
         assert len(to_k_hook) == len(to_v_hook)
@@ -174,8 +198,11 @@ def validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook):
         to_k_hook.clear()
         to_v_hook.clear()
 
-        all_images = [reference_image.resize((width, height))] + results
-        grid = image_grid(all_images, 1, 5)
+        if use_control:
+            all_images = [reference_image.resize((width, height))] + [control_image] + results
+        else:
+            all_images = [reference_image.resize((width, height))] + results
+        grid = image_grid(all_images, 1, len(all_images))
 
         validate_save(grid, prompt, os.path.join(args.output_dir, 'validate'), step)
         
@@ -215,10 +242,21 @@ def main():
     unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet")
     reference_net = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet")
 
+    controlnet = None
+    if args.use_control:
+        if args.control_type == 'canny':
+            controlnet = ControlNetModel.from_pretrained(args.canny_controlnet)
+        elif args.control_type == 'hed':
+            controlnet = ControlNetModel.from_pretrained(args.hed_controlnet)
+        else:
+            raise Exception('control_type must be canny or pose')
+    
     # freeze parameters of models to save more memory
     unet.requires_grad_(False)
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
+    if args.use_control:
+        controlnet.requires_grad_(False)
 
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16":
@@ -231,18 +269,20 @@ def main():
     unet.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
+    if args.use_control:
+        controlnet.to(accelerator.device, dtype=weight_dtype)
 
     # optimizer
     params_to_opt = reference_net.parameters()
     optimizer = torch.optim.AdamW(params_to_opt, lr=args.learning_rate, weight_decay=args.weight_decay)
 
     # dataloader
-    train_dataset = LaionHumanSD(data_root=args.data_root, json_file=args.json_file, tokenizer=tokenizer)
+    train_dataset = LaionHumanSD(data_root=args.data_root, json_file=args.json_file, tokenizer=tokenizer, use_control=args.use_control, control_type=args.control_type)
     # train_dataset = BaseDataset(json_file=args.json_file, tokenizer=tokenizer, control_type=args.control_type)
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
-        collate_fn=collate_fn,
+        collate_fn=collate_fn_control if args.use_control else collate_fn,
         batch_size=args.train_batch_size,
         num_workers=args.dataloader_num_workers,
     )
@@ -352,10 +392,19 @@ def main():
             # Add noise to the latents according to the noise magnitude at each timestep
             # (this is the forward diffusion process)
             noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
-        
+
             with torch.no_grad():
                 encoder_hidden_states = text_encoder(batch["text_input_ids"].to(accelerator.device))[0]
-            
+
+            if args.use_control:
+                control_image = batch["control_images"].to(dtype=weight_dtype)
+                down_block_res_samples, mid_block_res_sample = controlnet(
+                    noisy_latents,
+                    timesteps,
+                    encoder_hidden_states=encoder_hidden_states,
+                    controlnet_cond=control_image,
+                    return_dict=False,
+                )
             # Predict the noise residual
             zero_timesteps = torch.zeros_like(timesteps, device=latents.device).long()
 
@@ -365,11 +414,22 @@ def main():
                 encoder_hidden_states=encoder_hidden_states,
             ).sample
 
-            noise_pred = unet(
-                noisy_latents,
-                timesteps,
-                encoder_hidden_states=encoder_hidden_states
-            ).sample
+            if args.use_control:
+                noise_pred = unet(
+                    noisy_latents,
+                    timesteps,
+                    encoder_hidden_states=encoder_hidden_states,
+                    down_block_additional_residuals=[
+                        sample.to(dtype=weight_dtype) for sample in down_block_res_samples
+                    ],
+                    mid_block_additional_residual=mid_block_res_sample.to(dtype=weight_dtype),
+                ).sample
+            else:
+                noise_pred = unet(
+                    noisy_latents,
+                    timesteps,
+                    encoder_hidden_states=encoder_hidden_states
+                ).sample 
 
             # 避免unused parameters
             loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean") + 0 * aux.sum()
@@ -405,17 +465,30 @@ def main():
             accelerator.save_state(save_path)
 
         if accelerator.is_main_process and step % args.validate_steps == 0:
-            pipeline = StableDiffusionPipeline(
-                vae=vae,
-                text_encoder=text_encoder,
-                tokenizer=tokenizer,
-                unet=unet,
-                scheduler=noise_scheduler,
-                safety_checker=None,
-                feature_extractor=None,
-                requires_safety_checker=False,
-            )
-            validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook)
+            if args.use_control:
+                pipeline = StableDiffusionControlNetPipeline(
+                    vae=vae,
+                    text_encoder=text_encoder,
+                    tokenizer=tokenizer,
+                    unet=unet,
+                    controlnet=controlnet,
+                    scheduler=noise_scheduler,
+                    safety_checker=None,
+                    feature_extractor=None,
+                    requires_safety_checker=False,
+                )
+            else:
+                pipeline = StableDiffusionPipeline(
+                    vae=vae,
+                    text_encoder=text_encoder,
+                    tokenizer=tokenizer,
+                    unet=unet,
+                    scheduler=noise_scheduler,
+                    safety_checker=None,
+                    feature_extractor=None,
+                    requires_safety_checker=False,
+                )
+            validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook, args.use_control, args.control_type)
 
 
 if __name__ == "__main__":
