@@ -23,7 +23,7 @@ from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from diffusers.optimization import get_scheduler
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection, CLIPVisionModel
 
-from con_net.dataset.dataset2 import LaionHumanSD, CCTVDataset, TikTokDataset, BaseDataset
+from con_net.dataset.dataset_laionhuman_w_control import LaionHumanSD, CCTVDataset, TikTokDataset, BaseDataset
 from con_net.metric import Metric
 from con_net.utils import copy_src, image_grid
 from omegaconf import OmegaConf
@@ -171,6 +171,7 @@ def validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook, control_
         elif control_type == 'hed':
             control_image = hed(image)
 
+        control_image = control_image.resize((width, height), Image.BILINEAR)
         results = pipeline(prompt=prompt, width=width, height=height, image=control_image, num_inference_steps=50, num_images_per_prompt=4).images
 
         # reset hook list !!!!
@@ -181,8 +182,8 @@ def validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook, control_
         to_k_hook.clear()
         to_v_hook.clear()
 
-        all_images = [reference_image.resize((width, height))] + results
-        grid = image_grid(all_images, 1, 5)
+        all_images = [reference_image.resize((width, height))] + [control_image] + results
+        grid = image_grid(all_images, 1, len(all_images))
 
         validate_save(grid, prompt, os.path.join(args.output_dir, 'validate'), step)
         

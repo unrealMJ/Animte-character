@@ -1,8 +1,8 @@
 # pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
 # pretrained_model_name_or_path: 'xyn-ai/anything-v4.0'
-pretrained_model_name_or_path: 'Linaqruf/anything-v3.0'
-# pretrained_model_name_or_path: /mnt/petrelfs/liuwenran/.cache/huggingface/hub/models--runwayml--stable-diffusion-v1-5/snapshots/ded79e214aa69e42c24d3f5ac14b76d568679cc2
-
+# pretrained_model_name_or_path: 'Linaqruf/anything-v3.0'
+pretrained_model_name_or_path: /mnt/petrelfs/liuwenran/.cache/huggingface/hub/models--runwayml--stable-diffusion-v1-5/snapshots/ded79e214aa69e42c24d3f5ac14b76d568679cc2
+use_control: True
 control_type: canny
 
 canny_controlnet: lllyasviel/control_v11p_sd15_canny
@@ -16,4 +16,7 @@ json_file:
 
 # output_dir: output/reference_net/2023-12-07-19-45
 # output_dir: /mnt/petrelfs/share_data/majie/
-output_dir: output/reference_w_control/2023-12-25-12-03/checkpoint-5000
+# output_dir: output/reference_wo_control/2023-12-22-16-16/checkpoint-10000
+output_dir: output/reference_w_control/2023-12-25-20-50/checkpoint-25000
+validate_width: 512
+validate_height: 512
