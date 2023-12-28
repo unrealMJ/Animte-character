@@ -117,9 +117,6 @@ class Inferencer(BaseInferencer):
         results = self.pipe(prompt=prompt, width=width, height=height, num_inference_steps=50, pose_latents=pose_latents, num_images_per_prompt=4).images
 
         all_images = [reference] + [control_image_tmp] + results
-        # print(type(results))
-        # print(len(results))
-        # print(results)
         grid = image_grid(all_images, 1, 6)
         if return_raw:
             return all_images
@@ -166,8 +163,8 @@ if __name__ == '__main__':
     inferencer.make_hook()
     prompt = '1girl,upper body,cry,sad'
 
-    reference_path = '/mnt/petrelfs/majie/datasets/UBC_Fashion/data/test/0001/images/0001.png'
-    control_path = '/mnt/petrelfs/majie/datasets/UBC_Fashion/data/test/0001/pose/0149.png'
+    reference_path = '/mnt/petrelfs/majie/datasets/UBC_Fashion/data/test/0005/images/0001.png'
+    control_path = '/mnt/petrelfs/majie/datasets/UBC_Fashion/data/test/0005/pose/0149.png'
 
     reference = Image.open(reference_path).convert("RGB")
     control_image = Image.open(control_path).convert("RGB")
