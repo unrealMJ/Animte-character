@@ -22,6 +22,7 @@ from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjec
 
 from con_net.dataset.dataset2 import LaionHumanSD, CCTVDataset, TikTokDataset, BaseDataset, UBCFashionDataset, TikTokDataset2
 from train.base_train import BaseTrainer
+from con_net.model.PoseGuider import PoseGuider
 
 
 
@@ -69,16 +70,26 @@ class Trainer(BaseTrainer):
         if self.accelerator.is_main_process:
             self.logger.info(f"Loaded {len(train_dataset)} train samples, {len(self.train_dataloader) / self.accelerator.num_processes} batches")
 
+    def get_opt_params(self):
+        return itertools.chain(
+            self.reference_net.parameters(),
+            self.pose_guider.parameters(),
+        )
+    
     def build_custom_model(self):
         self.tokenizer = CLIPTokenizer.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="tokenizer")
         self.text_encoder = CLIPTextModel.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="text_encoder")
         self.text_encoder.requires_grad_(False)
         self.text_encoder.to(self.accelerator.device, dtype=self.weight_dtype)
 
-        self.controlnet = ControlNetModel.from_pretrained(self.cfg.pose_controlnet)
-        self.controlnet.requires_grad_(False)
-        self.controlnet.to(self.accelerator.device, dtype=self.weight_dtype)
-
+        self.pose_guider = PoseGuider(noise_latent_channels=4)
+    
+    def prepare(self):
+        # Prepare everything with our `accelerator`.
+        self.reference_net, self.pose_guider, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
+            self.reference_net, self.pose_guider, self.optimizer, self.train_dataloader, self.lr_scheduler)
+    
+      
     def train(self):
         train_dataloader_iter = iter(self.train_dataloader)
         for step in range(self.begin_step, self.end_step):
@@ -117,13 +128,9 @@ class Trainer(BaseTrainer):
                 
                 # controlnet
                 control_images = batch["control_images"].to(dtype=self.weight_dtype)
-                down_block_res_samples, mid_block_res_sample = self.controlnet(
-                    noisy_latents,
-                    timesteps,
-                    encoder_hidden_states=encoder_hidden_states,
-                    controlnet_cond=control_images,
-                    return_dict=False,
-                )
+                pose_latents = self.pose_guider(control_images)
+                pose_latents = pose_latents.to(noisy_latents.device, dtype=noisy_latents.dtype)  # torch.float32 -> torch.float16
+                noisy_latents = noisy_latents + pose_latents
 
                 # Predict the noise residual
                 zero_timesteps = torch.zeros_like(timesteps, device=latents.device).long()
@@ -139,11 +146,7 @@ class Trainer(BaseTrainer):
                 noise_pred = self.unet(
                     noisy_latents,
                     timesteps,
-                    encoder_hidden_states=encoder_hidden_states,
-                    down_block_additional_residuals=[
-                        sample.to(dtype=self.weight_dtype) for sample in down_block_res_samples
-                    ],
-                    mid_block_additional_residual=mid_block_res_sample.to(dtype=self.weight_dtype),
+                    encoder_hidden_states=encoder_hidden_states
                 ).sample
 
                 # 避免unused parameters
