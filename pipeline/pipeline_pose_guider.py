@@ -923,6 +923,7 @@ class StableDiffusionPipeline(
             ).to(device=device, dtype=latents.dtype)
 
         # 6.3 pose latents
+        pose_latents = torch.cat([pose_latents] * num_images_per_prompt, dim=0)
         if self.do_classifier_free_guidance:
             pose_latents = torch.cat([pose_latents] * 2)
         

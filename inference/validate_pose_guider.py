@@ -39,7 +39,6 @@ class Inferencer(BaseInferencer):
         reference_net = reference_net.to(dtype=torch.float16, device='cuda')
         self.reference_net = reference_net
         
-        pose_guider_path = f''
         pose_guider = PoseGuider()
         pose_guider.load_state_dict(torch.load(pose_guider_path, map_location='cpu'))
         pose_guider = pose_guider.to(dtype=torch.float16, device='cuda')
@@ -108,6 +107,7 @@ class Inferencer(BaseInferencer):
 
         self.reference_forward(reference, prompt)
 
+        control_image_tmp = control_image
         control_image = transforms.ToTensor()(control_image)
         control_image = control_image.unsqueeze(0)
         control_image = control_image.to('cuda').to(dtype=torch.float16)
@@ -116,7 +116,10 @@ class Inferencer(BaseInferencer):
         
         results = self.pipe(prompt=prompt, width=width, height=height, num_inference_steps=50, pose_latents=pose_latents, num_images_per_prompt=4).images
 
-        all_images = [reference] + [control_image] + results
+        all_images = [reference] + [control_image_tmp] + results
+        # print(type(results))
+        # print(len(results))
+        # print(results)
         grid = image_grid(all_images, 1, 6)
         if return_raw:
             return all_images
@@ -163,8 +166,8 @@ if __name__ == '__main__':
     inferencer.make_hook()
     prompt = '1girl,upper body,cry,sad'
 
-    reference_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/0.png'
-    control_path = '/mnt/petrelfs/majie/project/My-IP-Adapter/data/test_demo/pose2.png'
+    reference_path = '/mnt/petrelfs/majie/datasets/UBC_Fashion/data/test/0001/images/0001.png'
+    control_path = '/mnt/petrelfs/majie/datasets/UBC_Fashion/data/test/0001/pose/0149.png'
 
     reference = Image.open(reference_path).convert("RGB")
     control_image = Image.open(control_path).convert("RGB")
