@@ -24,6 +24,7 @@ from diffusers.optimization import get_scheduler
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection, CLIPVisionModel
 
 from con_net.dataset.dataset_laionhuman_w_control import LaionHumanSD, CCTVDataset, TikTokDataset, BaseDataset
+from con_net.dataset.dataset_tiktok import TikTok
 from con_net.metric import Metric
 from con_net.utils import copy_src, image_grid
 from omegaconf import OmegaConf
@@ -31,6 +32,7 @@ from inference.validate_wo_control import Inference
 import torchvision.transforms as transforms
 import einops
 from controlnet_aux import HEDdetector
+from controlnet_aux import OpenposeDetector
 import numpy as np
 import cv2
 
@@ -125,23 +127,29 @@ def validate_save(grid, prompt, exp_dir, step):
 
 
 def validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook, use_control, control_type):
-    val_image_lines = open('data/validate_images.txt').readlines()
-    val_prompt_lines = open('data/validate_prompts.txt').readlines()
+    val_image_lines = open(args.validate_image_file).readlines()
+    val_control_image_lines = open(args.validate_control_image_file).readlines()
 
     if use_control:
         if control_type == 'hed':
             hed = HEDdetector.from_pretrained('lllyasviel/ControlNet')
+        elif control_type == 'pose':
+            processor = OpenposeDetector.from_pretrained('lllyasviel/ControlNet')
 
     for i in range(len(val_image_lines)):
         image = val_image_lines[i].strip()
-        prompt = val_prompt_lines[i].strip()
+        # prompt = val_prompt_lines[i].strip()
+        prompt = ''
 
         reference_image = Image.open(image).convert("RGB")
 
-        width = args.validate_size
-        height = args.validate_size
+        width = args.validate_width
+        height = args.validate_height
         reference = reference_image.resize((width, height), Image.BILINEAR)
-        raw_image = reference
+        if use_control:
+            control_image_line = val_control_image_lines[i].strip()
+            control_image = Image.open(control_image_line).convert("RGB")
+            control_image = control_image.resize((width, height), Image.BILINEAR)
 
         reference = transforms.ToTensor()(reference)
         reference = transforms.Normalize([0.5], [0.5])(reference)
@@ -163,7 +171,7 @@ def validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook, use_cont
         encoder_hidden_states = pipeline.text_encoder(text_input_ids)[0]
         
         timesteps = torch.tensor([0]).long().to('cuda')
-        _ = reference_net(reference_latents, timesteps, encoder_hidden_states=encoder_hidden_states).sample
+        reference_net(reference_latents, timesteps, encoder_hidden_states=encoder_hidden_states).sample
 
         for i in range(len(to_k_hook)):
             feature = to_k_hook[i]
@@ -175,20 +183,23 @@ def validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook, use_cont
             feature = einops.repeat(feature, 'b l c -> (b n) l c', n=8)
             to_v_hook[i] = feature
 
+
         if use_control:
             if control_type == 'canny':
-                control_image = np.array(raw_image)
+                control_image = np.array(control_image)
                 control_image = cv2.Canny(control_image, 100, 200)
                 control_image = control_image[:, :, None]
                 control_image = np.concatenate([control_image, control_image, control_image], axis=2)
                 control_image = Image.fromarray(control_image)
+            elif control_type == 'pose':
+                control_image = processor(control_image, hand_and_face=True)
             elif control_type == 'hed':
-                control_image = hed(image)
-
-            control_image = control_image.resize((width, height), Image.BILINEAR)
-            results = pipeline(prompt=prompt, width=width, height=height, image=control_image, num_inference_steps=50, num_images_per_prompt=4).images
+                control_image = hed(control_image)
+            with torch.autocast("cuda"):
+                results = pipeline(prompt=prompt, width=width, height=height, image=control_image, num_inference_steps=50, num_images_per_prompt=4).images
         else:
-            results = pipeline(prompt=prompt, width=width, height=height, num_inference_steps=50, num_images_per_prompt=4).images
+            with torch.autocast("cuda"):
+                results = pipeline(prompt=prompt, width=width, height=height, num_inference_steps=50, num_images_per_prompt=4).images
 
         # reset hook list !!!!
         assert len(to_k_hook) == len(to_v_hook)
@@ -239,12 +250,17 @@ def main():
     unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet")
     reference_net = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet")
 
+    state_dict = torch.load(args.reference_ckpt_path, map_location='cpu')
+    reference_net.load_state_dict(state_dict)
+
     controlnet = None
     if args.use_control:
         if args.control_type == 'canny':
             controlnet = ControlNetModel.from_pretrained(args.canny_controlnet)
         elif args.control_type == 'hed':
             controlnet = ControlNetModel.from_pretrained(args.hed_controlnet)
+        elif args.control_type == 'pose':
+            controlnet == ControlNetModel.from_pretrained(args.pose_controlnet)
         else:
             raise Exception('control_type must be canny or pose')
     
@@ -252,8 +268,8 @@ def main():
     unet.requires_grad_(False)
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
-    if args.use_control:
-        controlnet.requires_grad_(False)
+    # if args.use_control:
+        # controlnet.requires_grad_(False)
 
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16":
@@ -266,15 +282,21 @@ def main():
     unet.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
-    if args.use_control:
-        controlnet.to(accelerator.device, dtype=weight_dtype)
+    # reference_net.to(accelerator.device, dtype=weight_dtype)
+    # if args.use_control:
+        # controlnet.to(dtype=weight_dtype)
+        # controlnet.to(accelerator.device, dtype=weight_dtype)
 
     # optimizer
-    params_to_opt = reference_net.parameters()
+    params_to_opt = (
+        itertools.chain(reference_net.parameters(), controlnet.parameters()) if args.use_control else reference_net.parameters()
+    )
+    # params_to_opt = reference_net.parameters()
     optimizer = torch.optim.AdamW(params_to_opt, lr=args.learning_rate, weight_decay=args.weight_decay)
 
     # dataloader
-    train_dataset = LaionHumanSD(data_root=args.data_root, json_file=args.json_file, tokenizer=tokenizer, use_control=args.use_control, control_type=args.control_type)
+    # train_dataset = LaionHumanSD(data_root=args.data_root, json_file=args.json_file, tokenizer=tokenizer, use_control=args.use_control, control_type=args.control_type)
+    train_dataset = TikTok(data_root=args.data_root, images_file=args.images_file, tokenizer=tokenizer, use_control=args.use_control, control_type=args.control_type)
     # train_dataset = BaseDataset(json_file=args.json_file, tokenizer=tokenizer, control_type=args.control_type)
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
@@ -295,8 +317,8 @@ def main():
     )
 
     # Prepare everything with our `accelerator`.
-    reference_net, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        reference_net, optimizer, train_dataloader, lr_scheduler)
+    reference_net, controlnet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        reference_net, controlnet, optimizer, train_dataloader, lr_scheduler)
 
     if args.resume is not None:
         accelerator.load_state(args.resume)
@@ -321,10 +343,10 @@ def main():
         # attn1是self-attn, attn2是cross-attn
         # 这里注册的顺序不对，需要重新排序
         # 似乎不需要排序，forward放入list的tensor是顺序的
-        if 'attn1.to_k' in k:
+        if ('up_blocks' in k or 'mid_block' in k) and 'attn1.to_k' in k:
             print(f'register hook for {k}, {v}')
             v.register_forward_hook(to_k_forward)
-        if 'attn1.to_v' in k:
+        if ('up_blocks' in k or 'mid_block' in k) and 'attn1.to_v' in k:
             print(f'register hook for {k}, {v}')
             v.register_forward_hook(to_v_forward)
 
@@ -352,14 +374,18 @@ def main():
     for k, v in unet.named_modules():
         # attn1是self-attn, attn2是cross-attn
         # 这里注册的顺序不对，需要重新排序
-        if 'attn1.to_k' in k:
+        if ('up_blocks' in k or 'mid_block' in k) and 'attn1.to_k' in k:
             print(f'register hook for {k}, {v}')
             v.register_forward_hook(to_k2_forward)
-        if 'attn1.to_v' in k:
+        if ('up_blocks' in k or 'mid_block' in k) and 'attn1.to_v' in k:
             print(f'register hook for {k}, {v}')
             v.register_forward_hook(to_v2_forward)
 
     # Train!
+    reference_net.train()
+    if args.use_control:
+        controlnet.train()
+
     train_dataloader_iter = iter(train_dataloader)
     for step in range(begin_step, args.num_train_steps):
         try:
@@ -368,7 +394,7 @@ def main():
             train_dataloader_iter = iter(train_dataloader)
             batch = next(train_dataloader_iter)
         
-        with accelerator.accumulate(reference_net):
+        with accelerator.accumulate([reference_net, controlnet]):
             # Convert images to latent space
             with torch.no_grad():
                 latents = vae.encode(batch["images"].to(accelerator.device, dtype=weight_dtype)).latent_dist.sample()
@@ -394,7 +420,7 @@ def main():
                 encoder_hidden_states = text_encoder(batch["text_input_ids"].to(accelerator.device))[0]
 
             if args.use_control:
-                control_image = batch["control_images"].to(dtype=weight_dtype)
+                control_image = batch["control_images"].to(dtype=weight_dtype).to(accelerator.device)
                 down_block_res_samples, mid_block_res_sample = controlnet(
                     noisy_latents,
                     timesteps,
@@ -454,39 +480,50 @@ def main():
 
             if step % args.log_steps == 0:
                 if accelerator.is_main_process:
-                    logger.info("Current time: {}, Step {}, lr, {}, step_loss: {}".format(
-                        time.strftime("%Y-%m-%d-%H-%M-%S"), step, lr_scheduler.get_last_lr()[0], avg_loss))
+                    info = "Current time: {}, Step {}, lr, {}, step_loss: {}".format(
+                        time.strftime("%Y-%m-%d-%H-%M-%S"), step, lr_scheduler.get_last_lr()[0], avg_loss)
+                    logger.info(info)
+                    print(info)
 
         if step > 0 and step % args.save_steps == 0:
             save_path = os.path.join(args.output_dir, f"checkpoint-{step}")
             accelerator.save_state(save_path)
 
-        if accelerator.is_main_process and step % args.validate_steps == 0:
-            if args.use_control:
-                pipeline = StableDiffusionControlNetPipeline(
-                    vae=vae,
-                    text_encoder=text_encoder,
-                    tokenizer=tokenizer,
-                    unet=unet,
-                    controlnet=controlnet,
-                    scheduler=noise_scheduler,
-                    safety_checker=None,
-                    feature_extractor=None,
-                    requires_safety_checker=False,
-                )
-            else:
-                pipeline = StableDiffusionPipeline(
-                    vae=vae,
-                    text_encoder=text_encoder,
-                    tokenizer=tokenizer,
-                    unet=unet,
-                    scheduler=noise_scheduler,
-                    safety_checker=None,
-                    feature_extractor=None,
-                    requires_safety_checker=False,
-                )
-            validate(args, pipeline, reference_net, step, to_k_hook, to_v_hook, args.use_control, args.control_type)
+        if accelerator.sync_gradients and step % args.validate_steps == 0:
+            if accelerator.is_main_process:
+                if args.use_control:
+                    unwrapped_controlnet = accelerator.unwrap_model(controlnet)
+
+                    pipeline = StableDiffusionControlNetPipeline.from_pretrained(
+                        args.pretrained_model_name_or_path,
+                        vae=vae,
+                        text_encoder=text_encoder,
+                        tokenizer=tokenizer,
+                        unet=unet,
+                        controlnet=unwrapped_controlnet,
+                        scheduler=noise_scheduler,
+                        safety_checker=None,
+                        feature_extractor=None,
+                        requires_safety_checker=False,
+                        torch_type=weight_dtype
+                    )
+                    pipeline = pipeline.to(accelerator.device)
+                else:
+                    pipeline = StableDiffusionPipeline(
+                        vae=vae,
+                        text_encoder=text_encoder,
+                        tokenizer=tokenizer,
+                        unet=unet,
+                        scheduler=noise_scheduler,
+                        safety_checker=None,
+                        feature_extractor=None,
+                        requires_safety_checker=False,
+                    )
+                unwrapped_reference_net = accelerator.unwrap_model(reference_net)
+                validate(args, pipeline, unwrapped_reference_net, step, to_k_hook, to_v_hook, args.use_control, args.control_type)
+                del pipeline
+                torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
-    main()    
+    main()

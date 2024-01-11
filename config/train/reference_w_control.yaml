@@ -3,10 +3,14 @@ pretrained_model_name_or_path: /mnt/petrelfs/liuwenran/.cache/huggingface/hub/mo
 image_encoder_path: /mnt/petrelfs/majie/project/IP-Adapter/IP-Adapter/models/image_encoder
 json_file: /mnt/petrelfs/share_data/majie/Aesthetics_Human/mapping_file_training.json
 data_root: /mnt/petrelfs/share_data/majie/
+images_file: /mnt/petrelfs/share_data/liuwenran/TikTok/all_images_sorted.txt
+
+reference_ckpt_path: /mnt/petrelfs/liuwenran/repos/Animte-character/output/reference_w_control/2023-12-25-20-50/checkpoint-25000/pytorch_model.bin
 
 use_control: True
 control_type: canny
-canny_controlnet: lllyasviel/control_v11p_sd15_canny
+# canny_controlnet: lllyasviel/control_v11p_sd15_canny
+canny_controlnet: /mnt/petrelfs/liuwenran/.cache/huggingface/hub/models--lllyasviel--control_v11p_sd15_canny/snapshots/115a470d547982438f70198e353a921996e2e819
 pose_controlnet: lllyasviel/control_v11p_sd15_openpose
 hed_controlnet: lllyasviel/sd-controlnet-hed
 lineart_controlnet: ControlNet-1-1-preview/control_v11p_sd15_lineart
@@ -23,9 +27,15 @@ lr_warmup_steps: 2000
 num_train_steps: 30000
 
 save_steps: 5000
-log_steps: 100
-output_dir: output/reference_w_control
-validate_steps: 100
-validate_size: 512
+log_steps: 10
+output_dir: output/reference_w_control_tiktok_canny_traincn
+
+
+validate_steps: 200
+validate_width: 512
+validate_height: 1024
+# validate_image_file: /mnt/petrelfs/liuwenran/repos/Animte-character/data/validate_images.txt
+validate_image_file: /mnt/petrelfs/liuwenran/repos/Animte-character/data/validate_pair_images.txt
+validate_control_image_file: /mnt/petrelfs/liuwenran/repos/Animte-character/data/validate_pair_images_part_two.txt
 
 resume: null

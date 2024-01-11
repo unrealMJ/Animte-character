@@ -1,7 +1,7 @@
 # pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
 # pretrained_model_name_or_path: 'xyn-ai/anything-v4.0'
-# pretrained_model_name_or_path: 'Linaqruf/anything-v3.0'
-pretrained_model_name_or_path: /mnt/petrelfs/liuwenran/.cache/huggingface/hub/models--runwayml--stable-diffusion-v1-5/snapshots/ded79e214aa69e42c24d3f5ac14b76d568679cc2
+pretrained_model_name_or_path: 'Linaqruf/anything-v3.0'
+# pretrained_model_name_or_path: /mnt/petrelfs/liuwenran/.cache/huggingface/hub/models--runwayml--stable-diffusion-v1-5/snapshots/ded79e214aa69e42c24d3f5ac14b76d568679cc2
 use_control: True
 control_type: canny
 
@@ -17,6 +17,11 @@ json_file:
 # output_dir: output/reference_net/2023-12-07-19-45
 # output_dir: /mnt/petrelfs/share_data/majie/
 # output_dir: output/reference_wo_control/2023-12-22-16-16/checkpoint-10000
-output_dir: output/reference_w_control/2023-12-25-20-50/checkpoint-25000
-validate_width: 512
-validate_height: 512
+# output_dir: output/reference_w_control/2023-12-25-20-50/checkpoint-25000
+# output_dir: output/reference_w_control_tiktok/2023-12-27-21-28/checkpoint-20000
+exp_dir: output/reference_w_control_tiktok_canny_traincn/2024-01-09-11-56/checkpoint-25000
+validate_width: 480
+validate_height: 864
+
+validate_image_file: /mnt/petrelfs/liuwenran/repos/Animte-character/data/inference_pair_images.txt
+validate_control_image_file: /mnt/petrelfs/liuwenran/repos/Animte-character/data/inference_pair_images_part_two.txt
