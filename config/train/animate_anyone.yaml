@@ -1,10 +1,14 @@
 pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffusion-v1-5
-image_encoder_path: /mnt/petrelfs/majie/project/IP-Adapter/IP-Adapter/models/image_encoder
+
+# clip_vision_path: openai/clip-vit-large-patch14
+clip_vision_path: openai/clip-vit-base-patch32
+
+# image_encoder_path: /mnt/petrelfs/majie/project/IP-Adapter/IP-Adapter/models/image_encoder
 motion_path: guoyww/animatediff-motion-adapter-v1-5-2
+
 json_file: 
-  # - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/tiktok_all.jsonl
   - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/video/video.jsonl
-  # /mnt/petrelfs/majie/project/My-IP-Adapter/data/UBC/video/train.jsonl
+  # - /mnt/petrelfs/majie/project/My-IP-Adapter/data/UBC/video/train.jsonl
 
 
 control_type: pose
@@ -13,10 +17,10 @@ pose_controlnet: lllyasviel/control_v11p_sd15_openpose
 canny_controlnet: lllyasviel/control_v11p_sd15_canny
 
 mixed_precision: fp16
-train_batch_size: 8
+train_batch_size: 6
 dataloader_num_workers: 4
 
-learning_rate: 1e-4
+learning_rate: 1e-5
 weight_decay: 0.01
 
 lr_scheduler: cosine
@@ -25,6 +29,6 @@ num_train_steps: 50000
 
 save_steps: 2500
 log_steps: 100
-output_dir: output/reference_net
+output_dir: output/animate_anyone
 
 resume: null

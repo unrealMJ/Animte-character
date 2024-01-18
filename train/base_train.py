@@ -1,4 +1,4 @@
-import os
+import os, sys
 import random
 import argparse
 from pathlib import Path
@@ -27,6 +27,7 @@ from con_net.dataset.dataset2 import LaionHumanSD, CCTVDataset, TikTokDataset, B
 from con_net.metric import Metric
 from con_net.utils import copy_src, image_grid
 from omegaconf import OmegaConf
+import shutil
 
 
 class BaseTrainer:
@@ -113,7 +114,14 @@ class BaseTrainer:
         if accelerator.is_main_process:
             if self.cfg.output_dir is not None:
                 os.makedirs(self.cfg.output_dir, exist_ok=True)
-            copy_src(os.path.join(self.cfg.output_dir, "src"))
+            
+            os.makedirs(os.path.join(self.cfg.output_dir, "src"), exist_ok=True)
+            save_cfg = vars(copy.deepcopy(self.cfg))
+            with open(f'{self.cfg.output_dir}/src/config.yaml', 'w') as f:
+                OmegaConf.save(OmegaConf.create(save_cfg), f)
+            shutil.copy(os.path.abspath(sys.argv[0]), os.path.join(self.cfg.output_dir, "src"))
+            shutil.copy('train/base_train.py', os.path.join(self.cfg.output_dir, "src"))
+            shutil.copytree('con_net/', os.path.join(self.cfg.output_dir, "src", 'con_net'))
 
             file_handler = logging.FileHandler(os.path.join(self.cfg.output_dir, "log.txt"))
             self.logger.logger.addHandler(file_handler)  

@@ -204,68 +204,18 @@ class CCTVDataset(BaseDataset):
 
 
 class TikTokDataset(BaseDataset):
-    def __init__(self, json_file, tokenizer, short_size=768, control_type='pose') -> None:
-        super().__init__(json_file, tokenizer, short_size, control_type)
-
-    def __getitem__(self, idx):
-        item = self.data[idx]
-
-        role_root = item['role_root']
-        all_images = os.listdir(f'{role_root}/images')
-        video_length = len(all_images)
-        
-        reference_idx = random.randint(0, video_length - 1)
-        image_idx = random.randint(0, video_length - 1)
-
-        reference_path = f'{role_root}/images/{str(reference_idx + 1).zfill(4)}.png'
-        image_path = f'{role_root}/images/{str(image_idx + 1).zfill(4)}.png'
-        control_path = f'{role_root}/{self.control_type}/{str(image_idx + 1).zfill(4)}.png'
-
-        reference = Image.open(reference_path).convert("RGB")
-        image = Image.open(image_path).convert("RGB")
-        control_image = Image.open(control_path).convert("RGB")
-
-        reference_prompt = ''
-        # with open(f'{role_root}/prompt/{str(image_idx + 1).zfill(4)}.txt') as f:
-        #     prompt = f.read()
-        prompt = 'best quality,high quality'
-
-        reference = self.reference_transform(reference)
-        image = self.image_transform(image)
-        control_image = self.control_transform(control_image)
-
-        reference_prompt = self.tokenizer(
-            reference_prompt,
-            max_length=self.tokenizer.model_max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt"
-        ).input_ids
-        prompt = self.tokenizer(
-            prompt,
-            max_length=self.tokenizer.model_max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt"
-        ).input_ids
-        
-        return {
-            'image': image,
-            'text_input_ids': prompt,
-            'reference': reference,
-            'control_image': control_image,
-            'reference_prompt': reference_prompt,
-        }
-
-# not return text prompt
-class TikTokDataset2(BaseDataset):
-    '''
-    This class not included text prompt
-    '''
     def __init__(self, json_file, tokenizer=None, short_size=768, control_type='pose', processor=None) -> None:
         super().__init__(json_file, tokenizer, short_size, control_type)
-        self.processor = processor
+        if processor is None:
+            self.processor = CLIPImageProcessor.from_pretrained('openai/clip-vit-base-patch32')
+        else:
+            self.processor = processor
 
+    def control_transform(self, control_image):
+        control_image = transforms.ToTensor()(control_image)
+        control_image = transforms.Normalize([0.5], [0.5])(control_image)
+        return control_image
+    
     def __getitem__(self, idx):
         item = self.data[idx]
 
@@ -274,6 +224,7 @@ class TikTokDataset2(BaseDataset):
         video_length = len(all_images)
         
         reference_idx = random.randint(0, video_length - 1)
+        reference_idx = 0
         image_idx = random.randint(0, video_length - 1)
 
         reference_path = f'{role_root}/images/{str(reference_idx + 1).zfill(4)}.png'
@@ -298,21 +249,47 @@ class TikTokDataset2(BaseDataset):
         image = self.image_transform(image)
         control_image = self.control_transform(control_image)
         
+        reference_prompt = ''
+        prompt = 'best quality,high quality'
+        # with open(f'{role_root}/prompt/{str(image_idx + 1).zfill(4)}.txt') as f:
+        #     prompt = f.read()
+        reference_prompt = self.tokenizer(
+            reference_prompt,
+            max_length=self.tokenizer.model_max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        ).input_ids
+        prompt = self.tokenizer(
+            prompt,
+            max_length=self.tokenizer.model_max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        ).input_ids
+
+        drop_image_embeds = 1 if random.random() < 0.1 else 0
+
         return {
             'image': image,
             'global_image': global_image,
             'reference': reference,
             'control_image': control_image,
+            'text_input_ids': prompt,
+            'reference_prompt': reference_prompt,
+            'drop_image_embeds': drop_image_embeds
         }
         
 
-class UBCFashionDataset(TikTokDataset):
-    def __init__(self, json_file, tokenizer, short_size=768, control_type='pose') -> None:
+class UBCFashionDataset(BaseDataset):
+    def __init__(self, json_file, tokenizer, short_size=768, control_type='pose', processor=None) -> None:
         super().__init__(json_file, tokenizer, short_size, control_type)
-        self.short_size = (720, 920)
+        self.short_size = (768, 768)
+        self.processor = processor
 
     def image_transform(self, image):
         image = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(image)
+        image = transforms.CenterCrop(self.short_size)(image)
 
         image = transforms.ToTensor()(image)
         image = transforms.Normalize([0.5], [0.5])(image)
@@ -321,6 +298,7 @@ class UBCFashionDataset(TikTokDataset):
     
     def reference_transform(self, reference):
         reference = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(reference)
+        reference = transforms.CenterCrop(self.short_size)(reference)
 
         reference = transforms.ToTensor()(reference)
         reference = transforms.Normalize([0.5], [0.5])(reference)
@@ -329,9 +307,65 @@ class UBCFashionDataset(TikTokDataset):
 
     def control_transform(self, control_image):
         control_image = transforms.Resize(self.short_size, interpolation=transforms.InterpolationMode.BILINEAR)(control_image)
+        control_image = transforms.CenterCrop(self.short_size)(control_image)
 
         control_image = transforms.ToTensor()(control_image)
+        control_image = transforms.Normalize([0.5], [0.5])(control_image)
         return control_image
+    
+    def __getitem__(self, idx):
+        item = self.data[idx]
+
+        role_root = item['role_root']
+        all_images = os.listdir(f'{role_root}/images')
+        video_length = len(all_images)
+        
+        reference_idx = random.randint(0, video_length - 1)
+        image_idx = random.randint(0, video_length - 1)
+
+        reference_path = f'{role_root}/images/{str(reference_idx + 1).zfill(4)}.png'
+        image_path = f'{role_root}/images/{str(image_idx + 1).zfill(4)}.png'
+        control_path = f'{role_root}/{self.control_type}/{str(image_idx + 1).zfill(4)}.png'
+
+        reference = Image.open(reference_path).convert("RGB")
+        image = Image.open(image_path).convert("RGB")
+        control_image = Image.open(control_path).convert("RGB")
+
+        global_image = self.processor(images=reference, return_tensors="pt").pixel_values
+        
+        reference_prompt = ''
+        # with open(f'{role_root}/prompt/{str(image_idx + 1).zfill(4)}.txt') as f:
+        #     prompt = f.read()
+        prompt = 'best quality,high quality'
+
+        reference = self.reference_transform(reference)
+        image = self.image_transform(image)
+        control_image = self.control_transform(control_image)
+
+        reference_prompt = self.tokenizer(
+            reference_prompt,
+            max_length=self.tokenizer.model_max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        ).input_ids
+        
+        prompt = self.tokenizer(
+            prompt,
+            max_length=self.tokenizer.model_max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        ).input_ids
+        
+        return {
+            'image': image,
+            'reference': reference,
+            'control_image': control_image,
+            'global_image': global_image,
+            'text_input_ids': prompt,
+            'reference_prompt': reference_prompt,
+        }
     
 
 class BaseVideoDataset(Dataset):

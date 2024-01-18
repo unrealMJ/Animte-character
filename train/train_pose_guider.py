@@ -20,9 +20,9 @@ from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from diffusers.optimization import get_scheduler
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection, CLIPVisionModel
 
-from con_net.dataset.dataset2 import LaionHumanSD, CCTVDataset, TikTokDataset, BaseDataset, UBCFashionDataset, TikTokDataset2
+from con_net.dataset.dataset2 import LaionHumanSD, TikTokDataset, UBCFashionDataset
 from train.base_train import BaseTrainer
-from con_net.model.PoseGuider import PoseGuider
+from con_net.model.PoseGuider import PoseGuider, ControlNetConditioningEmbedding
 
 
 
@@ -58,7 +58,7 @@ class Trainer(BaseTrainer):
 
     def build_data(self):
         # dataloader
-        train_dataset = UBCFashionDataset(json_file=self.cfg.json_file, tokenizer=self.tokenizer)
+        train_dataset = TikTokDataset(json_file=self.cfg.json_file, tokenizer=self.tokenizer)
         self.train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
             shuffle=True,
@@ -82,7 +82,8 @@ class Trainer(BaseTrainer):
         self.text_encoder.requires_grad_(False)
         self.text_encoder.to(self.accelerator.device, dtype=self.weight_dtype)
 
-        self.pose_guider = PoseGuider(noise_latent_channels=4)
+        # self.pose_guider = PoseGuider(noise_latent_channels=4)
+        self.pose_guider = ControlNetConditioningEmbedding()
     
     def prepare(self):
         # Prepare everything with our `accelerator`.
@@ -99,7 +100,7 @@ class Trainer(BaseTrainer):
                 train_dataloader_iter = iter(self.train_dataloader)
                 batch = next(train_dataloader_iter)
             
-            with self.accelerator.accumulate(self.reference_net):
+            with self.accelerator.accumulate(self.reference_net, self.pose_guider):
                 # Convert images to latent space
                 with torch.no_grad():
                     latents = self.vae.encode(batch["images"].to(self.accelerator.device, dtype=self.weight_dtype)).latent_dist.sample()
@@ -113,7 +114,7 @@ class Trainer(BaseTrainer):
                 # Sample noise that we'll add to the latents
                 noise = torch.randn_like(latents)
                 # noise offset
-                noise = noise + 0.1 * torch.randn(latents.shape[0], latents.shape[1], 1, 1).to(noise.device, dtype=noise.dtype)
+                # noise = noise + 0.1 * torch.randn(latents.shape[0], latents.shape[1], 1, 1).to(noise.device, dtype=noise.dtype)
                 bsz = latents.shape[0]
                 # Sample a random timestep for each image
                 timesteps = torch.randint(0, self.noise_scheduler.num_train_timesteps, (bsz,), device=latents.device)
@@ -126,10 +127,10 @@ class Trainer(BaseTrainer):
                 with torch.no_grad():
                     encoder_hidden_states = self.text_encoder(batch["text_input_ids"].to(self.accelerator.device))[0]
                 
-                # controlnet
+                # pose guider
                 control_images = batch["control_images"].to(dtype=self.weight_dtype)
                 pose_latents = self.pose_guider(control_images)
-                pose_latents = pose_latents.to(noisy_latents.device, dtype=noisy_latents.dtype)  # torch.float32 -> torch.float16
+                # pose_latents = pose_latents.to(noisy_latents.device, dtype=noisy_latents.dtype)  # torch.float32 -> torch.float16
                 noisy_latents = noisy_latents + pose_latents
 
                 # Predict the noise residual
@@ -174,7 +175,7 @@ class Trainer(BaseTrainer):
                     if self.accelerator.is_main_process:
                         self.logger.info("Current time: {}, Step {}, lr, {}, step_loss: {}".format(
                             time.strftime("%Y-%m-%d-%H-%M-%S"), step, self.lr_scheduler.get_last_lr()[0], avg_loss))
-            if step % self.cfg.save_steps == 0:
+            if step % self.cfg.save_steps == 0 or (step < 2500 and step % 500 == 0):
                 save_path = os.path.join(self.cfg.output_dir, 'checkpoints', f"checkpoint-{step}")
                 self.accelerator.save_state(save_path)
         

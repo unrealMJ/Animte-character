@@ -13,7 +13,7 @@ from con_net.utils import copy_src, image_grid
 import torchvision.transforms as transforms
 import einops
 from inference.base_inferencer import BaseInferencer
-from con_net.model.PoseGuider import PoseGuider
+from con_net.model.PoseGuider import PoseGuider, ControlNetConditioningEmbedding
 from pipeline.pipeline_pose_guider import StableDiffusionPipeline
 
 
@@ -39,7 +39,7 @@ class Inferencer(BaseInferencer):
         reference_net = reference_net.to(dtype=torch.float16, device='cuda')
         self.reference_net = reference_net
         
-        pose_guider = PoseGuider()
+        pose_guider = ControlNetConditioningEmbedding()
         pose_guider.load_state_dict(torch.load(pose_guider_path, map_location='cpu'))
         pose_guider = pose_guider.to(dtype=torch.float16, device='cuda')
         self.pose_guider = pose_guider
@@ -163,8 +163,11 @@ if __name__ == '__main__':
     inferencer.make_hook()
     prompt = '1girl,upper body,cry,sad'
 
-    reference_path = '/mnt/petrelfs/majie/datasets/UBC_Fashion/data/test/0005/images/0001.png'
-    control_path = '/mnt/petrelfs/majie/datasets/UBC_Fashion/data/test/0005/pose/0149.png'
+    # reference_path = '/mnt/petrelfs/majie/datasets/UBC_Fashion/data/test/0005/images/0001.png'
+    # control_path = '/mnt/petrelfs/majie/datasets/UBC_Fashion/data/test/0005/pose/0149.png'
+
+    reference_path = '/mnt/petrelfs/majie/datasets/TikTok/TikTok_dataset/00122/images/0001.png'
+    control_path = '/mnt/petrelfs/majie/datasets/TikTok/TikTok_dataset/00122/pose/0062.png'
 
     reference = Image.open(reference_path).convert("RGB")
     control_image = Image.open(control_path).convert("RGB")

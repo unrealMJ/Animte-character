@@ -11,3 +11,5 @@ animate.egg-info/*
 *.ckpt
 
 *.safetensors
+
+__pycache__

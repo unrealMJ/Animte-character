@@ -18,11 +18,12 @@ from diffusers import (
     )
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from diffusers.optimization import get_scheduler
-from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection, CLIPVisionModel
+from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection, CLIPVisionModel, AutoProcessor
 
-from con_net.dataset.dataset2 import LaionHumanSD, CCTVDataset, TikTokDataset, BaseDataset, UBCFashionDataset
+from con_net.dataset.dataset2 import LaionHumanSD, CCTVDataset, BaseDataset, UBCFashionDataset, TikTokDataset
 from train.base_train import BaseTrainer
-
+from con_net.model.PoseGuider import PoseGuider
+from con_net.model.hack_unet2d import Hack_UNet2DConditionModel
 
 
 class Trainer(BaseTrainer):
@@ -44,20 +45,22 @@ class Trainer(BaseTrainer):
     
     def collate_fn(self, data):
         images = torch.stack([example["image"] for example in data])
-        text_input_ids = torch.cat([example["text_input_ids"] for example in data], dim=0)
         references = torch.stack([example["reference"] for example in data])
         control_image = torch.stack([example["control_image"] for example in data])
-
+        global_image = torch.cat([example["global_image"] for example in data], dim=0)
         return {
             "images": images,
-            "text_input_ids": text_input_ids,
+            "global_images": global_image,
             "references": references,
             "control_images": control_image,
         }
 
     def build_data(self):
         # dataloader
-        train_dataset = TikTokDataset(json_file=self.cfg.json_file, tokenizer=self.tokenizer)
+        image_processor = AutoProcessor.from_pretrained(self.cfg.clip_vision_path)
+        
+        # train_dataset = UBCFashionDataset(json_file=self.cfg.json_file, tokenizer=self.tokenizer, processor=image_processor)
+        train_dataset = TikTokDataset(json_file=self.cfg.json_file, tokenizer=self.tokenizer, processor=image_processor)
         self.train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
             shuffle=True,
@@ -69,16 +72,42 @@ class Trainer(BaseTrainer):
         if self.accelerator.is_main_process:
             self.logger.info(f"Loaded {len(train_dataset)} train samples, {len(self.train_dataloader) / self.accelerator.num_processes} batches")
 
+    def get_opt_params(self):
+        return itertools.chain(
+            self.reference_net.parameters(),
+            self.pose_guider.parameters(),
+            self.unet.parameters()
+        )
+    
+    def build_model(self):
+        self.noise_scheduler = DDPMScheduler.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="scheduler")
+        self.vae = AutoencoderKL.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="vae")
+        self.unet = Hack_UNet2DConditionModel.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="unet")
+        self.reference_net = UNet2DConditionModel.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="unet")
+
+        # freeze parameters of models to save more memory
+        self.vae.requires_grad_(False)
+        
+        # TODO: 官网的教程说不需要.to(device)的操作
+        self.vae.to(self.accelerator.device, dtype=self.weight_dtype)
+
+        self.build_custom_model()
+
     def build_custom_model(self):
         self.tokenizer = CLIPTokenizer.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="tokenizer")
-        self.text_encoder = CLIPTextModel.from_pretrained(self.cfg.pretrained_model_name_or_path, subfolder="text_encoder")
-        self.text_encoder.requires_grad_(False)
-        self.text_encoder.to(self.accelerator.device, dtype=self.weight_dtype)
+        
+        self.image_encoder = CLIPVisionModel.from_pretrained(self.cfg.clip_vision_path)
+        self.image_encoder.requires_grad_(False)
+        self.image_encoder.to(self.accelerator.device, dtype=self.weight_dtype)
 
-        self.controlnet = ControlNetModel.from_pretrained(self.cfg.pose_controlnet)
-        self.controlnet.requires_grad_(False)
-        self.controlnet.to(self.accelerator.device, dtype=self.weight_dtype)
-
+        self.pose_guider = PoseGuider(noise_latent_channels=320)
+    
+    def prepare(self):
+        # Prepare everything with our `accelerator`.
+        self.reference_net, self.pose_guider, self.unet, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
+            self.reference_net, self.pose_guider, self.unet, self.optimizer, self.train_dataloader, self.lr_scheduler)
+    
+      
     def train(self):
         train_dataloader_iter = iter(self.train_dataloader)
         for step in range(self.begin_step, self.end_step):
@@ -88,7 +117,7 @@ class Trainer(BaseTrainer):
                 train_dataloader_iter = iter(self.train_dataloader)
                 batch = next(train_dataloader_iter)
             
-            with self.accelerator.accumulate(self.reference_net):
+            with self.accelerator.accumulate(self.reference_net, self.pose_guider, self.unet):
                 # Convert images to latent space
                 with torch.no_grad():
                     latents = self.vae.encode(batch["images"].to(self.accelerator.device, dtype=self.weight_dtype)).latent_dist.sample()
@@ -101,8 +130,6 @@ class Trainer(BaseTrainer):
 
                 # Sample noise that we'll add to the latents
                 noise = torch.randn_like(latents)
-                # noise offset
-                # noise = noise + 0.1 * torch.randn(latents.shape[0], latents.shape[1], 1, 1).to(noise.device, dtype=noise.dtype)
                 bsz = latents.shape[0]
                 # Sample a random timestep for each image
                 timesteps = torch.randint(0, self.noise_scheduler.num_train_timesteps, (bsz,), device=latents.device)
@@ -113,17 +140,12 @@ class Trainer(BaseTrainer):
                 noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
             
                 with torch.no_grad():
-                    encoder_hidden_states = self.text_encoder(batch["text_input_ids"].to(self.accelerator.device))[0]
+                    encoder_hidden_states = self.image_encoder(batch["global_images"].to(self.accelerator.device)).pooler_output
+                    encoder_hidden_states = encoder_hidden_states.unsqueeze(1)  # [bs, 1, 768]
                 
-                # controlnet
+                # pose guider
                 control_images = batch["control_images"].to(dtype=self.weight_dtype)
-                down_block_res_samples, mid_block_res_sample = self.controlnet(
-                    noisy_latents,
-                    timesteps,
-                    encoder_hidden_states=encoder_hidden_states,
-                    controlnet_cond=control_images,
-                    return_dict=False,
-                )
+                pose_latents = self.pose_guider(control_images)
 
                 # Predict the noise residual
                 zero_timesteps = torch.zeros_like(timesteps, device=latents.device).long()
@@ -140,10 +162,7 @@ class Trainer(BaseTrainer):
                     noisy_latents,
                     timesteps,
                     encoder_hidden_states=encoder_hidden_states,
-                    down_block_additional_residuals=[
-                        sample.to(dtype=self.weight_dtype) for sample in down_block_res_samples
-                    ],
-                    mid_block_additional_residual=mid_block_res_sample.to(dtype=self.weight_dtype),
+                    latent_pose=pose_latents
                 ).sample
 
                 # 避免unused parameters
@@ -174,7 +193,81 @@ class Trainer(BaseTrainer):
             if step % self.cfg.save_steps == 0 or (step < 2500 and step % 500 == 0):
                 save_path = os.path.join(self.cfg.output_dir, 'checkpoints', f"checkpoint-{step}")
                 self.accelerator.save_state(save_path)
+
+
+    def make_hook2(self):
+        # register reference_net hook
+        self.to_k_hook = []
+        self.to_v_hook = []
+
+        def to_k_forward(module, input_):
+            self.to_k_hook.append(input_)
+
+        def to_v_forward(module, input_):
+            self.to_v_hook.append(input_)
         
+        for k, v in self.reference_net.named_modules():
+            # attn1是self-attn, attn2是cross-attn
+            # 这里注册的顺序不对，需要重新排序
+            # 似乎不需要排序，forward放入list的tensor是顺序的
+            if 'attn1.to_k' in k:
+                v.register_forward_pre_hook(to_k_forward)
+            if 'attn1.to_v' in k:
+                v.register_forward_pre_hook(to_v_forward)
+
+        def to_k2_forward(module, input_):
+            tmp = self.to_k_hook.pop()  # torch.float16
+            assert input_.shape == tmp.shape
+            res = torch.cat([input_, tmp], dim=1)
+            return res
+
+        def to_v2_forward(module, input_):
+            # output_: [b, hw, c]
+            tmp = self.to_v_hook.pop()
+            assert input_.shape == tmp.shape
+            res = torch.cat([input_, tmp], dim=1)
+            return res
+        
+        for k, v in self.unet.named_modules():
+            if 'attn1.to_k' in k:
+                v.register_forward_pre_hook(to_k_forward)
+            if 'attn1.to_v' in k:
+                v.register_forward_pre_hook(to_v_forward)
+    
+    def make_hook(self):
+        # register reference_net hook
+        self.to_k_hook = []
+        self.to_v_hook = []
+
+        def to_k_forward(module, input_, output_):
+            self.to_k_hook.append(output_)
+
+        def to_v_forward(module, input_, output_):
+            self.to_v_hook.append(output_)
+        
+        for k, v in self.reference_net.named_modules():
+            if 'attn1.to_k' in k:
+                v.register_forward_hook(to_k_forward)
+            if 'attn1.to_v' in k:
+                v.register_forward_hook(to_v_forward)
+
+        def to_k2_forward(module, input_, output_):
+            tmp = self.to_k_hook.pop()  # torch.float16
+            assert output_.shape == tmp.shape
+            res = torch.cat([output_, tmp], dim=1)
+            return res
+
+        def to_v2_forward(module, input_, output_):
+            tmp = self.to_v_hook.pop()
+            assert output_.shape == tmp.shape
+            res = torch.cat([output_, tmp], dim=1)
+            return res
+        
+        for k, v in self.unet.named_modules():
+            if 'attn1.to_k' in k:
+                v.register_forward_hook(to_k2_forward)
+            if 'attn1.to_v' in k:
+                v.register_forward_hook(to_v2_forward)
 
 if __name__ == "__main__":
     trainer = Trainer()

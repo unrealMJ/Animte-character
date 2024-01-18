@@ -2,8 +2,8 @@ pretrained_model_name_or_path: /mnt/petrelfs/majie/model_checkpoint/stable-diffu
 image_encoder_path: /mnt/petrelfs/majie/project/IP-Adapter/IP-Adapter/models/image_encoder
 motion_path: guoyww/animatediff-motion-adapter-v1-5-2
 json_file: 
-  # - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/tiktok_all.jsonl
-  /mnt/petrelfs/majie/project/My-IP-Adapter/data/UBC/video/train.jsonl
+  - /mnt/petrelfs/majie/project/My-IP-Adapter/data/tiktok/video/video.jsonl
+  # /mnt/petrelfs/majie/project/My-IP-Adapter/data/UBC/video/train.jsonl
 
 
 control_type: pose
@@ -11,8 +11,8 @@ control_type: pose
 pose_controlnet: lllyasviel/control_v11p_sd15_openpose
 canny_controlnet: lllyasviel/control_v11p_sd15_canny
 
-mixed_precision: fp16
-train_batch_size: 8
+mixed_precision: 'no'
+train_batch_size: 4
 dataloader_num_workers: 4
 
 learning_rate: 1e-4
